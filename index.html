@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Soldier Helmet // Telemetry C2 Playground</title>
+  <!-- High-Precision System Typography (Inter + JetBrains Mono for telemetry numerals) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="palantir-platform">
+
+  <!-- TOP APP NAVIGATION & TELEMETRY C2 HEADER -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="suwida-defense-logo" title="SUWIDA Advanced Defense Headgear System">
+        <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+          <polygon points="16,2 30,9 30,23 16,30 2,23 2,9" stroke="#38bdf8" stroke-width="2" fill="rgba(56, 189, 248, 0.12)" />
+          <path d="M16 6 L24 11 L16 16 L8 11 Z" stroke="#38bdf8" stroke-width="1.5" fill="rgba(56, 189, 248, 0.25)" />
+          <circle cx="16" cy="19" r="4" stroke="#f59e0b" stroke-width="1.5" fill="#0b101a" />
+          <circle cx="16" cy="19" r="1.5" fill="#f59e0b" />
+          <line x1="16" y1="13" x2="16" y2="15" stroke="#38bdf8" stroke-width="1.5" />
+          <line x1="16" y1="23" x2="16" y2="26" stroke="#38bdf8" stroke-width="1.5" />
+          <line x1="10" y1="19" x2="12" y2="19" stroke="#38bdf8" stroke-width="1.5" />
+          <line x1="20" y1="19" x2="22" y2="19" stroke="#38bdf8" stroke-width="1.5" />
+        </svg>
+      </div>
+      <div class="header-titles">
+        <div class="main-title-wrap">
+          <h1 class="main-title">SUWIDA // SMART SOLDIER HELMET C2</h1>
+          <span class="badge-defense-batch">AEGIS-IV</span>
+        </div>
+        <div class="meta-title">LIVE SENSOR C2 &amp; FLIGHT-GRADE GYRO DYNAMICS</div>
+      </div>
+    </div>
+
+    <!-- Center Hardware Stream Status & GPS Satellite Status -->
+    <div class="header-center">
+      <div class="stream-status-pill standby" id="system-status-pill">
+        <span class="status-indicator-dot" id="system-status-dot"></span>
+        <span class="status-text" id="system-status-text">HARDWARE STANDBY — CONNECT USB</span>
+      </div>
+      <div class="gps-status-pill" title="NEO-6M Satellite Navigation Status">
+        <span class="gps-pulse-dot"></span>
+        <span class="gps-text">NEO-6M GPS: ACTIVE FIX</span>
+      </div>
+    </div>
+
+    <!-- Right Connectivity Controls -->
+    <div class="header-right">
+      <div class="port-metadata">
+        <span class="meta-label">PORT:</span>
+        <span class="meta-val" id="port-status-text">DISCONNECTED</span>
+        <span class="meta-sep">/</span>
+        <span class="meta-label">BAUD:</span>
+        <span class="meta-val">115200</span>
+      </div>
+
+      <button id="btn-open-protocols" class="btn-tool" title="View Military Safety Standards & Mitigation Protocols">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+        <span>STANDARDS &amp; SAFETY</span>
+      </button>
+
+      <button id="btn-serial-connect" class="btn-primary-action">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+        </svg>
+        <span id="btn-connect-text">CONNECT USB</span>
+      </button>
+
+      <button id="btn-demo-toggle" class="btn-subtle" title="Toggle Hardware Test Stream">
+        <span class="sim-dot"></span>
+        <span id="btn-demo-text">TEST HARNESS</span>
+      </button>
+
+      <button id="btn-theme-toggle" class="btn-tool theme-toggle" title="Switch Theme (Light / Dark Mode)">
+        <span id="theme-icon">☀️</span>
+        <span id="theme-text">LIGHT</span>
+      </button>
+
+      <button id="btn-audio-toggle" class="btn-icon" title="Toggle Audio Telemetry Chirps">
+        <span id="audio-icon">🔊</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- CRITICAL INCIDENT BANNER (Appears automatically when thresholds are exceeded) -->
+  <div id="incident-banner" class="incident-banner hidden">
+    <div class="incident-icon">⚠️</div>
+    <div class="incident-details">
+      <div class="incident-title" id="incident-title">CRITICAL HAZARD DETECTED</div>
+      <div class="incident-msg" id="incident-msg">Sensor values have breached military safety thresholds.</div>
+    </div>
+    <div class="incident-remediation" id="incident-remediation">
+      <span class="remediation-tag">REQUIRED ACTION:</span>
+      <span id="incident-action-text">Evacuate contaminated area immediately.</span>
+    </div>
+    <button id="btn-dismiss-incident" class="btn-tiny-dismiss">DISMISS</button>
+  </div>
+
+  <!-- MAIN INTERACTIVE PLAYGROUND WORKSPACE (3-COLUMN TACTICAL PLAYGROUND) -->
+  <main class="playground-stage">
+
+    <!-- LEFT FLANK: LIFE SUPPORT & CBRN (APPLE TACTICAL WIDGETS) -->
+    <aside class="playground-flank left-flank">
+
+      <!-- WIDGET 1: MQ-135 TOXIC CHEMICAL & CBRN -->
+      <div class="apple-widget state-standby" id="card-mq135" onclick="openWidgetInspector('card-mq135')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-gas"></span>
+            <span class="sensor-chip">MQ-135</span>
+          </div>
+          <span class="badge-status standby" id="pill-gas">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">TOXIC GASES / CBRN</h3>
+            <span class="widget-sub-title">Breathing Zone Inhalation Quality</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-gas">— AO</span>
+          </div>
+        </div>
+
+        <!-- Dynamic Scenario Status ("Saying what has happened") -->
+        <div class="widget-scenario-status" id="scenario-gas">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <!-- Expandable Deep Dive Drawer (Hover or Click) -->
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            SnO₂ metal-oxide semiconductor detecting benzene, alcohol, smoke particulates, ammonia (NH₃), and CO₂ asphyxiation hazards inside soldier breathing envelope.
+          </p>
+
+          <div class="threshold-track">
+            <div class="threshold-bar" id="bar-gas" style="width: 0%;"></div>
+          </div>
+          <div class="threshold-scale">
+            <span class="scale-item safe">SAFE &lt;800</span>
+            <span class="scale-item warn">ELEV 800–1400</span>
+            <span class="scale-item danger">CRIT &gt;1400</span>
+          </div>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">MIL-STD-1472H / ASHRAE 62.1</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">REMEDIATION:</span>
+              <span class="proto-val">Auto-purge filter canister; verify mask seal; evacuate zone.</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('PURGE_AIR')">PURGE AIRFLOW</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 2: MQ-7 CARBON MONOXIDE (CO) PROBE -->
+      <div class="apple-widget state-standby" id="card-mq7" onclick="openWidgetInspector('card-mq7')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-co"></span>
+            <span class="sensor-chip">MQ-7</span>
+          </div>
+          <span class="badge-status standby" id="pill-co">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">CARBON MONOXIDE (CO)</h3>
+            <span class="widget-sub-title">Combustion &amp; Blast Blowback</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-co">— AO</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-co">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            Micro-SnO₂ high-temperature cycling sensor tracking odorless Carbon Monoxide poisoning from artillery blowback, rocket backblast, and vehicle exhaust.
+          </p>
+
+          <div class="threshold-track">
+            <div class="threshold-bar" id="bar-co" style="width: 0%;"></div>
+          </div>
+          <div class="threshold-scale">
+            <span class="scale-item safe">SAFE &lt;400</span>
+            <span class="scale-item warn">ELEV 400–900</span>
+            <span class="scale-item danger">LETHAL &gt;900</span>
+          </div>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">NIOSH REL: 35 ppm / OSHA PEL: 50 ppm</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">REMEDIATION:</span>
+              <span class="proto-val">Oxygen bypass valve open; HUD flash alert; combat egress.</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action danger" onclick="event.stopPropagation(); sendSerialCommand('EVAC_ALARM')">EVACUATION TONE</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 3: DHT22 VISOR MICRO-CLIMATE & HEAT STRESS -->
+      <div class="apple-widget state-standby" id="card-dht22" onclick="openWidgetInspector('card-dht22')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-dht"></span>
+            <span class="sensor-chip">DHT22</span>
+          </div>
+          <span class="badge-status standby" id="pill-dht22">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">VISOR MICRO-CLIMATE</h3>
+            <span class="widget-sub-title">Thermal Strain &amp; Condensation</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-dht-summary">—°C / —%</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-dht">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            Capacitive humidity sensor &amp; thermistor monitoring heat exhaustion, hypothermia, and dew point fogging on the ballistic optical face shield.
+          </p>
+
+          <div class="dual-metric-split">
+            <div class="split-box">
+              <span class="split-lbl">VISOR TEMP</span>
+              <span class="split-val no-data" id="val-amb-temp">— °C</span>
+              <span class="split-sub">&lt; 32°C NORMAL // &gt; 38°C HEAT STROKE</span>
+            </div>
+            <div class="split-box">
+              <span class="split-lbl">HUMIDITY</span>
+              <span class="split-val no-data" id="val-humidity">— %</span>
+              <span class="split-sub">&gt; 75% CONDENSATION TRIP</span>
+            </div>
+          </div>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">DEW POINT:</span>
+              <span class="proto-val" id="val-dew-point">— °C [STANDBY]</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">US Army TB MED 507</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('BLOWER_PULSE')">ANTI-FOG BLOWER PULSE</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 4: IR OPTICAL FACE SHIELD SEAL -->
+      <div class="apple-widget state-standby" id="card-ir" onclick="openWidgetInspector('card-ir')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-ir"></span>
+            <span class="sensor-chip">IR PROXIMITY</span>
+          </div>
+          <span class="badge-status standby" id="pill-ir">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">VISOR SEAL &amp; LATCH</h3>
+            <span class="widget-sub-title">Ballistic Shield Airtight Lock</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-ir">—</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-ir">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            940nm infrared reflection detector verifying visor position, face shield airtight lock, and immediate obstacle detection within 15 cm defense cone.
+          </p>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- CENTER COLUMN: 3D DIGITAL TWIN + DEDICATED TOP FLIGHT HUD LEVEL METER -->
+    <section class="playground-center">
+
+      <!-- TOP DEDICATED FLIGHT HUD LEVEL METER WIDGET (ACCURATE, REAL, STABLE) -->
+      <div class="hud-level-widget" id="hud-level-widget" onclick="openWidgetInspector('card-gforce')" title="Click to Inspect MPU-6050 Kinematics">
+        <div class="hud-widget-header">
+          <div class="hud-title-box">
+            <span class="hud-badge-tag">AIRCRAFT HUD</span>
+            <h4 class="hud-widget-heading">MPU-6050 ATTITUDE LEVEL INDICATOR</h4>
+          </div>
+          <div class="hud-status-badge" id="hud-stability-text">STABLE LEVEL // 0.0°</div>
+        </div>
+
+        <div class="hud-instrument-body">
+          <!-- Top Bank Angle Arc & Dynamic Roll Pointer -->
+          <div class="hud-arc-track">
+            <svg class="hud-arc-svg" viewBox="0 0 240 40">
+              <path d="M 25 35 A 110 110 0 0 1 215 35" fill="none" stroke="rgba(56, 189, 248, 0.45)" stroke-width="1.5" />
+              <!-- Degree Tick Marks: -45, -30, -20, -10, 0, +10, +20, +30, +45 -->
+              <line x1="120" y1="5" x2="120" y2="12" stroke="#38bdf8" stroke-width="2" />
+              <line x1="88" y1="11" x2="90" y2="16" stroke="rgba(56, 189, 248, 0.6)" stroke-width="1.5" />
+              <line x1="152" y1="11" x2="150" y2="16" stroke="rgba(56, 189, 248, 0.6)" stroke-width="1.5" />
+              <line x1="58" y1="21" x2="62" y2="25" stroke="rgba(56, 189, 248, 0.5)" stroke-width="1.5" />
+              <line x1="182" y1="21" x2="178" y2="25" stroke="rgba(56, 189, 248, 0.5)" stroke-width="1.5" />
+            </svg>
+            <div class="hud-roll-pointer" id="hud-roll-pointer">
+              <div class="pointer-triangle"></div>
+            </div>
+          </div>
+
+          <!-- Artificial Horizon Window & Dynamic Pitch Ladder -->
+          <div class="hud-horizon-window">
+            <!-- Center Boresight Reticle -->
+            <div class="hud-boresight-fixed">
+              <div class="boresight-dot"></div>
+              <div class="boresight-wing left"></div>
+              <div class="boresight-wing right"></div>
+            </div>
+
+            <!-- Dynamic Horizon & Pitch Ladder Gimbal (Translates with Pitch, Rotates with Roll) -->
+            <div class="hud-horizon-gimbal" id="hud-pitch-ladder">
+              <div class="pitch-rung deg20">
+                <span class="rung-deg">+20</span>
+                <span class="rung-bars">━━ ┯ ━━</span>
+                <span class="rung-deg">+20</span>
+              </div>
+              <div class="pitch-rung deg10">
+                <span class="rung-deg">+10</span>
+                <span class="rung-bars">━━ ┯ ━━</span>
+                <span class="rung-deg">+10</span>
+              </div>
+              <div class="pitch-rung horizon">
+                <span class="rung-deg">00</span>
+                <span class="rung-bars-horizon">━━━━━ HORIZON ━━━━━</span>
+                <span class="rung-deg">00</span>
+              </div>
+              <div class="pitch-rung neg10">
+                <span class="rung-deg">-10</span>
+                <span class="rung-bars dashed">╌╌ ┷ ╌╌</span>
+                <span class="rung-deg">-10</span>
+              </div>
+              <div class="pitch-rung neg20">
+                <span class="rung-deg">-20</span>
+                <span class="rung-bars dashed">╌╌ ┷ ╌╌</span>
+                <span class="rung-deg">-20</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Digital Telemetry Attitude Readouts -->
+          <div class="hud-readout-dock">
+            <div class="dock-cell">
+              <span class="dock-lbl">ROLL</span>
+              <span class="dock-val no-data" id="val-roll">0.0°</span>
+            </div>
+            <span class="dock-sep">/</span>
+            <div class="dock-cell">
+              <span class="dock-lbl">PITCH</span>
+              <span class="dock-val no-data" id="val-pitch">0.0°</span>
+            </div>
+            <span class="dock-sep">/</span>
+            <div class="dock-cell">
+              <span class="dock-lbl">YAW</span>
+              <span class="dock-val no-data" id="val-yaw">0.0°</span>
+            </div>
+            <span class="dock-sep">/</span>
+            <div class="dock-cell">
+              <span class="dock-lbl">LOAD</span>
+              <span class="dock-val no-data" id="val-hud-g">1.00 G</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3D HELMET DIGITAL TWIN VIEWPORT (Completely Unblocked & Clear) -->
+      <div class="center-helmet-viewport" id="viewport-container">
+        <canvas id="threeHoloCanvas"></canvas>
+
+        <!-- Subtle Tactical Alignment Crosshair in Center -->
+        <div class="tactical-subtle-crosshair">
+          <div class="crosshair-reticle"></div>
+        </div>
+
+        <!-- Floating HUD Viewport Toolbar (Zoom & Navigation) -->
+        <div class="hud-viewport-toolbar">
+          <button id="btn-zoom-in" class="btn-hud-tool" title="Zoom In (or use Mouse Scroll Wheel)">
+            <span>＋</span>
+          </button>
+          <button id="btn-zoom-out" class="btn-hud-tool" title="Zoom Out (or use Mouse Scroll Wheel)">
+            <span>－</span>
+          </button>
+          <button id="btn-sync-gyro" class="btn-hud-tool" title="Reset Standard Tactical Perspective">
+            <span>⟲</span>
+          </button>
+          <button id="btn-tilt-anim" class="btn-hud-tool" title="Toggle 360° Inspection Spin">
+            <span>360°</span>
+          </button>
+          <span class="hud-hint-pill">MOUSE DRAG: ORBIT | SCROLL: ZOOM</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT FLANK: BALLISTICS, HARDWARE C2 & PHYSIOLOGY (APPLE TACTICAL WIDGETS) -->
+    <aside class="playground-flank right-flank">
+
+      <!-- WIDGET 5: MPU-6050 BALLISTIC IMPACT & TBI CONCUSSION -->
+      <div class="apple-widget state-standby" id="card-gforce" onclick="openWidgetInspector('card-gforce')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-gforce"></span>
+            <span class="sensor-chip">MPU-6050</span>
+          </div>
+          <span class="badge-status standby" id="concussion-badge">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">BALLISTIC IMPACT &amp; TBI</h3>
+            <span class="widget-sub-title">Kinetic Blast Shockwave Vector</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-gforce">— G</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-gforce">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            MEMS triaxial accelerometer capturing kinetic impacts, ballistic shell deflections, and blast overpressure to diagnose Traumatic Brain Injury (TBI).
+          </p>
+
+          <div class="threshold-track">
+            <div class="threshold-bar" id="bar-gforce" style="width: 0%;"></div>
+          </div>
+          <div class="threshold-scale">
+            <span class="scale-item safe">ROUTINE &lt;2.5G</span>
+            <span class="scale-item warn">SHOCK 2.5–4.5G</span>
+            <span class="scale-item danger">TBI RISK &gt;4.5G</span>
+          </div>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">PEO Soldier / MIL-STD-662F</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">REMEDIATION:</span>
+              <span class="proto-val">Record black-box impact; transmit Soldier Down beacon; pupil triage.</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action danger" onclick="event.stopPropagation(); sendSerialCommand('LOG_TBI')">LOG IMPACT EVENT</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 6: ONBOARD ESP32 HARDWARE ACTUATORS -->
+      <div class="apple-widget state-standby" id="card-hardware-c2" onclick="openWidgetInspector('card-hardware-c2')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-hw"></span>
+            <span class="sensor-chip">ESP32 C2</span>
+          </div>
+          <span class="badge-status ready">BUS READY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">HARDWARE ACTUATORS</h3>
+            <span class="widget-sub-title">Onboard Peripherals &amp; Comms</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-hw">
+          Hardware GPIO bus active. 5.0V power rail stabilized.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <div class="hardware-status-grid">
+            <div class="hw-cell">
+              <span class="hw-lbl">GPS LOCATION:</span>
+              <span class="hw-val" id="val-gps">ACTIVE RECON</span>
+            </div>
+            <div class="hw-cell">
+              <span class="hw-lbl">OLED HUD:</span>
+              <span class="hw-val" id="val-oled">PAGE 0 [SYS]</span>
+            </div>
+            <div class="hw-cell">
+              <span class="hw-lbl">ACOUSTIC BUZZER:</span>
+              <span class="hw-val" id="val-buzzer">STANDBY</span>
+            </div>
+            <div class="hw-cell">
+              <span class="hw-lbl">POWER RAIL:</span>
+              <span class="hw-val highlight">VBUS 5.0V LINK</span>
+            </div>
+          </div>
+
+          <div class="actuator-button-row">
+            <button id="btn-sound-buzzer" class="btn-action" onclick="event.stopPropagation()">
+              <span>🔊 TEST BUZZER PING</span>
+            </button>
+            <button id="btn-manual-sos" class="btn-action danger" onclick="event.stopPropagation()">
+              <span>🚨 TRANSMIT DISTRESS SOS</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 7: SOLDIER BIOMETRIC VECTOR PROBES -->
+      <div class="apple-widget state-standby" id="card-biometrics" onclick="openWidgetInspector('card-biometrics')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-bio"></span>
+            <span class="sensor-chip">PHYSIOLOGY</span>
+          </div>
+          <span class="badge-status standby" id="pill-bio">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">BIOMETRIC VECTORS</h3>
+            <span class="widget-sub-title">Cardiovascular &amp; Core Vitals</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-bio">
+          Awaiting soldier pulse oximetry contact harness connection.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <div class="bio-table">
+            <div class="bio-row">
+              <span class="bio-name">PULSE RATE (MAX30100):</span>
+              <span class="bio-num no-data" id="val-bpm">— BPM</span>
+            </div>
+            <div class="bio-row">
+              <span class="bio-name">OXYGEN SATURATION (SpO2):</span>
+              <span class="bio-num no-data" id="val-spo2">— %</span>
+            </div>
+            <div class="bio-row">
+              <span class="bio-name">CORE TEMP (DS18B20):</span>
+              <span class="bio-num no-data" id="val-temp">— °C</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 8: REAL-TIME SERIAL TELEMETRY TERMINAL -->
+      <div class="apple-widget state-standby" id="card-terminal" onclick="openWidgetInspector('card-terminal')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot active"></span>
+            <span class="sensor-chip">SERIAL BUS</span>
+          </div>
+          <span class="packet-counter" id="packet-counter">0 PKTS</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">HARDWARE STREAM</h3>
+            <span class="widget-sub-title">115200 Baud Direct USB Ingestion</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-term">
+          Direct hardware UART ingestion stream via Web Serial API.
+        </div>
+
+        <div class="widget-depth-drawer">
+          <div class="terminal-box">
+            <div class="terminal-bar">
+              <span class="terminal-hint">115200 BAUD // LIVE INGESTION</span>
+              <button id="btn-clear-term" class="btn-mini" onclick="event.stopPropagation()">CLEAR</button>
+            </div>
+            <div class="terminal-display" id="terminal-body">
+              <div class="t-line dim">[INIT] Tactical telemetry engine initialized.</div>
+              <div class="t-line dim">[USB] Awaiting hardware link at 115200 baud... Zero hardcoded data active.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <!-- DEFENSE STANDARDS, SAFETY THRESHOLDS & REMEDIATION MODAL -->
+  <div id="modal-standards" class="modal-backdrop hidden">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h2>DEFENSE SAFETY THRESHOLDS &amp; REMEDIATION PROTOCOLS</h2>
+          <p class="modal-subtitle">Military, OSHA, NIOSH &amp; DoD Operational Standards for Smart Soldier Headgear</p>
+        </div>
+        <button id="btn-close-modal" class="btn-modal-close" aria-label="Close Modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <table class="standards-table">
+          <thead>
+            <tr>
+              <th>SENSOR / SUBSYSTEM</th>
+              <th>OPERATIONAL DOMAIN</th>
+              <th>STANDARD &amp; SAFE THRESHOLD</th>
+              <th>HAZARD BREACH CRITERIA</th>
+              <th>AUTONOMOUS REMEDIATION PROTOCOL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>MQ-135</strong><br><span class="tbl-sub">Air Quality / Toxic Gas</span></td>
+              <td>CBRN / Atmospheric Inhalation Zone</td>
+              <td><strong>&lt; 1000 ppm eq. (AO &lt; 800)</strong><br><span class="tbl-sub">MIL-STD-1472H / ASHRAE 62.1</span></td>
+              <td>&gt; 2000 ppm eq. (AO &gt; 1400)<br>Combustion fumes, NH₃, Benzene, CO₂</td>
+              <td><strong>1.</strong> Auto-trips CBRN filter intake valve.<br><strong>2.</strong> Audio chirp to soldier to verify mask seal.<br><strong>3.</strong> Telemetry beacon transmitted to C2 squad.</td>
+            </tr>
+            <tr>
+              <td><strong>MQ-7</strong><br><span class="tbl-sub">Carbon Monoxide Probe</span></td>
+              <td>Combustion &amp; Blast Blowback Hazard</td>
+              <td><strong>&lt; 35 ppm (AO &lt; 400)</strong><br><span class="tbl-sub">NIOSH REL: 35 ppm / OSHA PEL: 50 ppm</span></td>
+              <td>&gt; 100 ppm (AO &gt; 900)<br>IDLH (Immediately Dangerous to Life)</td>
+              <td><strong>1.</strong> Strobe warning on soldier HUD.<br><strong>2.</strong> Acoustic buzzer alarm activated.<br><strong>3.</strong> Immediate operator evacuation advisory.</td>
+            </tr>
+            <tr>
+              <td><strong>DHT22</strong><br><span class="tbl-sub">Micro-Climate Array</span></td>
+              <td>Visor Fogging &amp; Soldier Heat Strain</td>
+              <td><strong>Temp: 18°C – 32°C</strong><br><strong>RH: &lt; 70%</strong><br><span class="tbl-sub">US Army TB MED 507</span></td>
+              <td>Temp &gt; 38°C (Heat Stroke)<br>RH &gt; 75% (Optical Visor Fogging)</td>
+              <td><strong>1.</strong> Activates visor micro-blower anti-fog pulse.<br><strong>2.</strong> Hydration advisory prompt sent to squad lead.<br><strong>3.</strong> Logs physiological strain score.</td>
+            </tr>
+            <tr>
+              <td><strong>MPU-6050</strong><br><span class="tbl-sub">6-DOF IMU Kinematics</span></td>
+              <td>Kinetic Impact &amp; Traumatic Brain Injury</td>
+              <td><strong>Routine: &lt; 2.5 G</strong><br><span class="tbl-sub">DoD Blast Injury / MIL-STD-662F</span></td>
+              <td>&gt; 4.5 G (Mild Concussion)<br>&gt; 8.0 G (Severe TBI Trauma)</td>
+              <td><strong>1.</strong> Black-box impact vector recorded to EEPROM.<br><strong>2.</strong> High-priority Soldier Down beacon with GPS coordinates.<br><strong>3.</strong> Automatic buzzer ping stimulus to check consciousness.</td>
+            </tr>
+            <tr>
+              <td><strong>IR Sensor</strong><br><span class="tbl-sub">Optical Reflection</span></td>
+              <td>Ballistic Visor Seal &amp; Obstacle Range</td>
+              <td><strong>Visor Locked / Clear &gt; 15 cm</strong></td>
+              <td>Visor Breach / Obstacle &lt; 15 cm</td>
+              <td><strong>1.</strong> Alert soldier to unlatched face shield.<br><strong>2.</strong> Proximity beep for close-quarters situational awareness.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-footer">
+        <span class="footer-note">All threshold parameters dynamically evaluated during live USB serial polling.</span>
+        <button id="btn-modal-done" class="btn-primary-action">ACKNOWLEDGE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WIDGET ON-SCREEN DETAIL POPUP MODAL (Opens when clicking any widget, with [X] close button) -->
+  <div id="modal-widget-detail" class="standards-modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-window widget-detail-window">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="detail-badge-row">
+            <span class="apple-status-dot" id="detail-modal-dot"></span>
+            <span class="sensor-chip" id="detail-modal-chip">SENSOR CHIP</span>
+            <span class="badge-status standby" id="detail-modal-status">STANDBY</span>
+          </div>
+          <h2 id="detail-modal-title">SUBSYSTEM TELEMETRY INSPECTOR</h2>
+          <p class="modal-subtitle" id="detail-modal-subtitle">Real-time military sensor telemetry, pinout specifications &amp; mitigation protocols</p>
+        </div>
+        <button id="btn-close-widget-modal" class="btn-modal-close" aria-label="Close Widget Detail">&times;</button>
+      </div>
+
+      <div class="modal-body detail-modal-body">
+        <!-- Live Metric Banner -->
+        <div class="detail-live-banner">
+          <div class="detail-metric-left">
+            <span class="detail-metric-lbl">LIVE TELEMETRY READING</span>
+            <div class="detail-metric-val" id="detail-modal-value">—</div>
+            <div class="detail-metric-sub" id="detail-modal-sub">—</div>
+          </div>
+          <div class="detail-scenario-card" id="detail-modal-scenario-card">
+            <span class="scenario-tag">ACTIVE SITUATION REPORT:</span>
+            <p id="detail-modal-scenario">Awaiting live USB telemetry packet stream from ESP32 microcontroller.</p>
+          </div>
+        </div>
+
+        <!-- Specifications & Hardware Pinout Grid -->
+        <div class="detail-grid">
+          <div class="detail-card">
+            <h4>HARDWARE &amp; INTERFACE SPECS</h4>
+            <div class="detail-spec-row">
+              <span class="spec-k">Microcontroller:</span>
+              <span class="spec-v">ESP32 Dual-Core Xtensa LX6 (32-bit)</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Hardware Bus / Pin:</span>
+              <span class="spec-v" id="detail-modal-pin">GPIO —</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Signal Protocol:</span>
+              <span class="spec-v" id="detail-modal-protocol">Standard Telemetry Stream</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Sampling Rate:</span>
+              <span class="spec-v">10 Hz (100 ms packet interval)</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Operating Voltage:</span>
+              <span class="spec-v">3.3V Logic / 5.0V VBUS Sensor Rail</span>
+            </div>
+          </div>
+
+          <div class="detail-card">
+            <h4>MILITARY &amp; SAFETY STANDARDS</h4>
+            <div class="detail-spec-row">
+              <span class="spec-k">Standard Reference:</span>
+              <span class="spec-v" id="detail-modal-std">MIL-STD-1472H / TB MED 507</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Nominal Operational Range:</span>
+              <span class="spec-v" id="detail-modal-range">Standard Safe Envelope</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Warning Threshold:</span>
+              <span class="spec-v" id="detail-modal-warn">Elevated Risk Parameter</span>
+            </div>
+            <div class="detail-spec-row">
+              <span class="spec-k">Critical Hazard Limit:</span>
+              <span class="spec-v text-danger" id="detail-modal-crit">Immediate Action Trigger</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sensor Function Deep Dive -->
+        <div class="detail-desc-card">
+          <h4>SUBSYSTEM MISSION ROLE &amp; SCIENTIFIC PRINCIPLE</h4>
+          <p id="detail-modal-description">Detailed sensor description and tactical purpose.</p>
+        </div>
+
+        <!-- Remediation Protocol Box -->
+        <div class="detail-remediation-box">
+          <div class="remediation-header">
+            <span class="rem-icon">🛡️</span>
+            <div>
+              <h5>MANDATORY REMEDIATION ACTION PROTOCOL</h5>
+              <p id="detail-modal-remediation">Automated protocol executed when threshold limits are breached.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="detail-footer-actions" id="detail-modal-actions">
+          <!-- Dynamic control buttons populated based on widget -->
+        </div>
+        <button id="btn-done-widget-modal" class="btn-primary-action">CLOSE INSPECTOR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS: Three.js WebGL Engine + Mission C2 Telemetry Driver -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

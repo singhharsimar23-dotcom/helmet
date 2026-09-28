@@ -23,6 +23,7 @@ const state = {
   // Live Telemetry (Initialized to null — ABSOLUTELY ZERO HARDCODED MOCK VALUES)
   telemetry: {
     // MPU-6050 6-Axis Inertial Measurement Unit (IMU)
+    // NOTE: Firmware sends pre-computed roll/pitch/yaw/gforce — not raw ax/ay/az
     ax: null,
     ay: null,
     az: null,
@@ -31,22 +32,28 @@ const state = {
     yaw: null,
     gforce: null,
 
-    // DHT22 Micro-Climate Life Support
+    // DHT11/DHT22 Micro-Climate Life Support
+    // Firmware JSON key: "ambTemp" (not "temp")
     ambientTemp: null,
     humidity: null,
     dewPoint: null,
 
-    // MQ-135 Hazardous Gases & VOC Air Quality
-    gasPpm: null,      // Calibrated engineering PPM (converted from ADC)
-    mq135Ao: null,     // Raw 12-bit ADC reading (0–4095) for display subtext
+    // MQ-2/MQ-135 Hazardous Gases & VOC Air Quality
+    // Firmware JSON key: "gas" (already mapped PPM 30–800 range by firmware)
+    gasPpm: null,
+    mq135Ao: null,     // Raw ADC — only from line-by-line text protocol
     mq135Do: null,
 
-    // MQ-7 Carbon Monoxide (CO)
-    coPpm: null,       // Calibrated engineering PPM (converted from ADC)
-    mq7Ao: null,       // Raw 12-bit ADC reading (0–4095) for display subtext
+    // MQ-7 Carbon Monoxide (CO) — NOT in firmware JSON, text-protocol only
+    coPpm: null,
+    mq7Ao: null,
     mq7Do: null,
 
-    // Infrared Proximity / Face Shield Seal
+    // HC-SR04 Ultrasonic Proximity Distance
+    // Firmware JSON key: "dist" (cm)
+    distCm: null,
+
+    // Infrared Proximity / Face Shield Seal (text protocol)
     irStatus: null,
 
     // Onboard Actuators & C2
@@ -54,11 +61,22 @@ const state = {
     oledPage: null,
     gps: null,
 
-    // Soldier Biometrics (Awaiting sensor harness attachment)
+    // GPS Geolocation (NEO-6M / NEO-8M)
+    // Firmware JSON keys: "lat", "lng", "alt", "sats"
+    lat: null,
+    lng: null,
+    alt: null,
+    sats: null,
+
+    // Soldier Biometrics (MAX30102 + DS18B20 body temp)
     bpm: null,
     spo2: null,
-    temp: null,
+    temp: null,     // body temp from DS18B20 (firmware key: "temp")
 
+    // Power Management
+    battery: null,  // Firmware JSON key: "battery" (0–100 %)
+
+    // Emergency State
     sos: false,
     concussion: false
   },
@@ -1912,7 +1930,7 @@ function evaluateSafetyStandards(t) {
     }
   }
 
-  // 5. IR Face Shield
+  // 5. IR Face Shield (text protocol)
   if (t.irStatus && t.irStatus.includes('OBSTACLE')) {
     incidents.push({
       severity: 'warn',
@@ -1923,8 +1941,50 @@ function evaluateSafetyStandards(t) {
     });
   }
 
+  // 6. HC-SR04 Proximity — close-range obstacle alert (< 20 cm)
+  if (t.distCm !== null && t.distCm < 20 && t.distCm > 0) {
+    incidents.push({
+      severity: 'warn',
+      sensor: 'HC-SR04',
+      title: 'PROXIMITY ALERT: OBSTACLE < 20 CM',
+      msg: `Object detected ${Math.round(t.distCm)} cm ahead. Close-quarters obstacle in tactical path.`,
+      action: 'Halt advance; verify perimeter; check for IED proximity threat.'
+    });
+  }
+
+  // 7. Battery critical
+  if (t.battery !== null && t.battery < 15) {
+    incidents.push({
+      severity: 'danger',
+      sensor: 'POWER',
+      title: 'CRITICAL BATTERY: < 15% REMAINING',
+      msg: `Helmet power reserve at ${t.battery}%. Imminent system shutdown risk.`,
+      action: 'Return to base; hot-swap power cell; maintain GPS beacon active.'
+    });
+  } else if (t.battery !== null && t.battery < 30) {
+    incidents.push({
+      severity: 'warn',
+      sensor: 'POWER',
+      title: 'LOW BATTERY WARNING: < 30%',
+      msg: `Power reserve at ${t.battery}%. Prioritize mission completion.`,
+      action: 'Reduce sensor polling rate; return to resupply point.'
+    });
+  }
+
+  // 8. Hardware SOS button activated
+  if (t.sos) {
+    incidents.push({
+      severity: 'danger',
+      sensor: 'SOS BTN',
+      title: 'HARDWARE SOS DISTRESS BUTTON ACTIVATED',
+      msg: 'Physical panic button on helmet triggered by soldier. Immediate extraction required.',
+      action: 'Transmit GPS coordinates to squad leader; activate acoustic buzzer beacon.'
+    });
+  }
+
   return incidents;
 }
+
 
 // ============================================================================
 // 5. TELEMETRY REFLECTION & DASHBOARD UI UPDATE (ZERO HARDCODED VALUES)
@@ -2136,10 +2196,48 @@ function updateDashboardUI(t) {
     }
   }
 
-  // 6. Actuators
+  // 6. Actuators + GPS + Battery + Distance
   if (t.buzzer !== null && UI.valBuzzer) UI.valBuzzer.textContent = `${t.buzzer} // READY`;
   if (t.oledPage !== null && UI.valOled) UI.valOled.textContent = `PAGE ${t.oledPage} [SYS]`;
-  if (t.gps !== null && UI.valGps) UI.valGps.textContent = t.gps;
+
+  // GPS: show lat/lng if available, otherwise GPS active status
+  if (UI.valGps) {
+    if (t.lat !== null && t.lng !== null) {
+      const satStr = t.sats !== null ? ` · ${t.sats} SATS` : '';
+      const altStr = t.alt !== null ? ` · ${Math.round(t.alt)}m ASL` : '';
+      UI.valGps.textContent = `${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E${altStr}${satStr}`;
+    } else if (t.gps !== null) {
+      UI.valGps.textContent = t.gps;
+    }
+  }
+
+  // Battery %
+  const valBattery = document.getElementById('val-battery');
+  if (valBattery && t.battery !== null) {
+    valBattery.textContent = `${t.battery}%`;
+    valBattery.style.color = t.battery < 20 ? 'var(--state-danger-red)' : t.battery < 40 ? 'var(--state-warn-amber)' : 'var(--state-safe-green)';
+  }
+
+  // HC-SR04 Ultrasonic Distance
+  const valDist = document.getElementById('val-dist');
+  if (valDist && t.distCm !== null) {
+    valDist.textContent = `${Math.round(t.distCm)} cm`;
+    valDist.style.color = t.distCm < 20 ? 'var(--state-warn-amber)' : 'var(--text-secondary)';
+  }
+
+  // Hardware SOS state from physical button
+  if (t.sos && state.isConnected) {
+    // Hardware SOS button was pressed on the helmet
+    const sosBtn = UI.btnManualSos;
+    if (sosBtn && !state.telemetry._sosDisplayed) {
+      state.telemetry._sosDisplayed = true;
+      logTerminal('[HARDWARE SOS] Physical SOS button activated on helmet!');
+      playAlertSiren();
+    }
+  } else {
+    state.telemetry._sosDisplayed = false;
+  }
+
 
   // 7. Biometrics
   if (t.bpm !== null && !isNaN(t.bpm)) {
@@ -2303,32 +2401,86 @@ function handleIncomingSerialLine(raw) {
   }
   logTerminal(raw);
 
-  // Check if payload is JSON
+  // Check if payload is JSON (primary firmware output format)
   if (raw.startsWith('{') && raw.endsWith('}')) {
     try {
       const obj = JSON.parse(raw);
+
+      // ── MPU-6050 ───────────────────────────────────────────────────────────
+      // Firmware sends pre-computed roll/pitch/yaw/gforce — NOT raw ax/ay/az
+      if (obj.roll    !== undefined) state.telemetry.roll   = parseFloat(obj.roll);
+      if (obj.pitch   !== undefined) state.telemetry.pitch  = parseFloat(obj.pitch);
+      if (obj.yaw     !== undefined) state.telemetry.yaw    = parseFloat(obj.yaw);
+      if (obj.gforce  !== undefined) {
+        const g = parseFloat(obj.gforce);
+        // Guard: if gforce is 0 (sensor sleeping), default to Earth 1G baseline
+        state.telemetry.gforce = (g < 0.01) ? 1.00 : g;
+      }
+      // Raw axes (only present in some custom builds, safe to parse if present)
       if (obj.ax !== undefined) state.telemetry.ax = parseFloat(obj.ax);
       if (obj.ay !== undefined) state.telemetry.ay = parseFloat(obj.ay);
       if (obj.az !== undefined) state.telemetry.az = parseFloat(obj.az);
-      if (obj.roll !== undefined) state.telemetry.roll = parseFloat(obj.roll);
-      if (obj.pitch !== undefined) state.telemetry.pitch = parseFloat(obj.pitch);
-      if (obj.yaw !== undefined) state.telemetry.yaw = parseFloat(obj.yaw);
-      if (obj.temp !== undefined) state.telemetry.ambientTemp = parseFloat(obj.temp);
-      if (obj.hum !== undefined) state.telemetry.humidity = parseFloat(obj.hum);
-      if (obj.mq135 !== undefined) state.telemetry.gasPpm = parseFloat(obj.mq135);
-      if (obj.mq7 !== undefined) state.telemetry.coPpm = parseFloat(obj.mq7);
-      if (obj.ir !== undefined) state.telemetry.irStatus = obj.ir ? 'OBSTACLE DETECTED' : 'CLEAR';
 
-      if (state.telemetry.ax !== null && state.telemetry.ay !== null && state.telemetry.az !== null) {
-        state.telemetry.gforce = Math.sqrt(
-          state.telemetry.ax * state.telemetry.ax +
-          state.telemetry.ay * state.telemetry.ay +
-          state.telemetry.az * state.telemetry.az
-        );
+      // ── DHT22 — KEY FIX: firmware uses "ambTemp", NOT "temp" ───────────────
+      if (obj.ambTemp !== undefined) {
+        const v = parseFloat(obj.ambTemp);
+        if (!isNaN(v) && v >= 10.0 && v <= 60.0) state.telemetry.ambientTemp = v;
       }
+      // Fallback: some custom firmware builds use "ambientTemp"
+      if (obj.ambientTemp !== undefined) {
+        const v = parseFloat(obj.ambientTemp);
+        if (!isNaN(v) && v >= 10.0 && v <= 60.0) state.telemetry.ambientTemp = v;
+      }
+      if (obj.hum !== undefined) {
+        const v = parseFloat(obj.hum);
+        if (!isNaN(v) && v >= 1 && v <= 99) state.telemetry.humidity = v;
+      }
+
+      // ── MQ-135 Gas — KEY FIX: firmware uses "gas", NOT "mq135" ────────────
+      // Firmware already maps ADC to PPM (30–800 range), so store directly
+      if (obj.gas !== undefined) {
+        state.telemetry.gasPpm = parseFloat(obj.gas);
+        state.telemetry.mq135Ao = null; // no raw AO in JSON mode
+      }
+      // Also accept "mq135" key for custom firmware builds
+      if (obj.mq135 !== undefined) state.telemetry.gasPpm = parseFloat(obj.mq135);
+      // MQ-7 key (not in current firmware but handle if added)
+      if (obj.mq7 !== undefined) state.telemetry.coPpm = parseFloat(obj.mq7);
+
+      // ── HC-SR04 Ultrasonic Distance — KEY FIX: firmware uses "dist" ────────
+      if (obj.dist !== undefined) state.telemetry.distCm = parseFloat(obj.dist);
+
+      // ── Biometrics: body temp uses "temp", NOT "ambTemp" ───────────────────
+      if (obj.temp !== undefined) {
+        const v = parseFloat(obj.temp);
+        if (!isNaN(v) && v >= 30.0 && v <= 45.0) state.telemetry.temp = v;
+      }
+      if (obj.bpm  !== undefined) state.telemetry.bpm  = parseFloat(obj.bpm);
+      if (obj.spo2 !== undefined) state.telemetry.spo2 = parseFloat(obj.spo2);
+
+      // ── GPS Geolocation ─────────────────────────────────────────────────────
+      if (obj.lat  !== undefined) state.telemetry.lat  = parseFloat(obj.lat);
+      if (obj.lng  !== undefined) state.telemetry.lng  = parseFloat(obj.lng);
+      if (obj.alt  !== undefined) state.telemetry.alt  = parseFloat(obj.alt);
+      if (obj.sats !== undefined) state.telemetry.sats = parseInt(obj.sats, 10);
+
+      // ── Power & SOS ─────────────────────────────────────────────────────────
+      if (obj.battery !== undefined) state.telemetry.battery = parseInt(obj.battery, 10);
+      if (obj.sos     !== undefined) state.telemetry.sos     = Boolean(parseInt(obj.sos, 10));
+
+      // ── Legacy / custom keys ────────────────────────────────────────────────
+      if (obj.ir !== undefined) state.telemetry.irStatus = obj.ir ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+
+      // Update GPS status pill from parsed lat/lng
+      if (state.telemetry.lat !== null && state.telemetry.lng !== null) {
+        state.telemetry.gps = `${state.telemetry.lat.toFixed(5)}°N, ${state.telemetry.lng.toFixed(5)}°E`;
+      }
+
       updateDashboardUI(state.telemetry);
       return;
-    } catch (e) { }
+    } catch (e) {
+      logTerminal(`[JSON PARSE ERROR] ${e.message} | raw: ${raw.substring(0, 60)}`);
+    }
   }
 
   const upper = raw.toUpperCase();

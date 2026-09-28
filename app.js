@@ -1707,17 +1707,20 @@ function animate3D() {
       helmetGroup.rotation.z += (0 - helmetGroup.rotation.z) * 0.12;
       currentPitchDeg = (helmetGroup.rotation.x * 180) / Math.PI;
       currentRollDeg = -(helmetGroup.rotation.z * 180) / Math.PI;
-    } else if (state.hasLiveStream && state.telemetry.pitch !== null) {
-      // Live MPU-6050 Euler angles received from hardware
-      currentPitchDeg = Number(state.telemetry.pitch) || 0;
-      currentRollDeg = Number(state.telemetry.roll) || 0;
+    } else if (state.hasLiveStream && state.telemetry.pitch !== null && !isNaN(state.telemetry.pitch)) {
+      // LIVE MPU-6050: firmware sends pre-computed Euler angles in degrees
+      // Use high lerp factor (0.22) for snappy real-time helmet tracking
+      currentPitchDeg = Number(state.telemetry.pitch);
+      currentRollDeg  = Number(state.telemetry.roll) || 0;
       const targetPitchRad = (currentPitchDeg * Math.PI) / 180;
-      const targetRollRad = (currentRollDeg * Math.PI) / 180;
-      const targetYawRad = (((state.telemetry.yaw || 180) - 180) * Math.PI) / 180;
+      const targetRollRad  = (currentRollDeg  * Math.PI) / 180;
+      // Yaw: firmware sends 0–360°, remap to -180–+180 relative to center
+      const rawYaw = Number(state.telemetry.yaw) || 180;
+      const targetYawRad = ((rawYaw - 180) * Math.PI) / 180;
 
-      helmetGroup.rotation.x += (targetPitchRad - helmetGroup.rotation.x) * 0.1;
-      helmetGroup.rotation.z += (-targetRollRad - helmetGroup.rotation.z) * 0.1;
-      helmetGroup.rotation.y += (targetYawRad - helmetGroup.rotation.y) * 0.1;
+      helmetGroup.rotation.x += (targetPitchRad - helmetGroup.rotation.x) * 0.22;
+      helmetGroup.rotation.z += (-targetRollRad - helmetGroup.rotation.z) * 0.22;
+      helmetGroup.rotation.y += (targetYawRad   - helmetGroup.rotation.y) * 0.22;
     } else {
       // Neutral tactical inspection pose
       helmetGroup.rotation.x += (0.12 - helmetGroup.rotation.x) * 0.06;
@@ -1987,24 +1990,33 @@ function evaluateSafetyStandards(t) {
 
 
 // ============================================================================
-// 5. TELEMETRY REFLECTION & DASHBOARD UI UPDATE (ZERO HARDCODED VALUES)
+// 5. TELEMETRY REFLECTION & DASHBOARD UI UPDATE
 // ============================================================================
+
+// Safe number formatter — returns fallback if value is null/NaN/undefined
+function safeNum(val, decimals = 1, fallback = '—') {
+  if (val === null || val === undefined) return fallback;
+  const n = Number(val);
+  if (isNaN(n)) return fallback;
+  return n.toFixed(decimals);
+}
+
 function updateDashboardUI(t) {
-  // If NO live data has been received yet, keep dashboard strictly in STANDBY (zero hardcoded values)
+  // If NO live data has been received yet, keep dashboard in clean STANDBY
   if (!state.hasLiveStream) {
     // 1. MQ-135 Gas
-    if (UI.valGas) { UI.valGas.textContent = '— AO'; UI.valGas.className = 'metric-compact no-data'; }
+    if (UI.valGas) { UI.valGas.textContent = '— PPM'; UI.valGas.className = 'metric-compact no-data'; }
     if (UI.pillGas) { UI.pillGas.textContent = 'STANDBY'; UI.pillGas.className = 'badge-status standby'; }
-    if (UI.barGas) UI.barGas.style.width = '0%';
+    if (UI.barGas) { UI.barGas.style.width = '0%'; UI.barGas.className = 'threshold-bar'; }
     if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-standby';
-    if (UI.scenarioGas) UI.scenarioGas.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+    if (UI.scenarioGas) UI.scenarioGas.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
 
-    // 2. MQ-7 CO
-    if (UI.valCo) { UI.valCo.textContent = '— AO'; UI.valCo.className = 'metric-compact no-data'; }
-    if (UI.pillCo) { UI.pillCo.textContent = 'STANDBY'; UI.pillCo.className = 'badge-status standby'; }
-    if (UI.barCo) UI.barCo.style.width = '0%';
+    // 2. MQ-7 CO (not in firmware JSON — text protocol only)
+    if (UI.valCo) { UI.valCo.textContent = '— PPM'; UI.valCo.className = 'metric-compact no-data'; }
+    if (UI.pillCo) { UI.pillCo.textContent = 'N/A'; UI.pillCo.className = 'badge-status standby'; }
+    if (UI.barCo) { UI.barCo.style.width = '0%'; UI.barCo.className = 'threshold-bar'; }
     if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-standby';
-    if (UI.scenarioCo) UI.scenarioCo.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+    if (UI.scenarioCo) UI.scenarioCo.textContent = 'MQ-7 not in current firmware — will populate if sensor added.';
 
     // 3. DHT22 Climate
     if (UI.valDhtSummary) { UI.valDhtSummary.textContent = '—°C / —%'; UI.valDhtSummary.className = 'metric-compact no-data'; }
@@ -2013,25 +2025,27 @@ function updateDashboardUI(t) {
     if (UI.valDewPoint) { UI.valDewPoint.textContent = '— °C [STANDBY]'; }
     if (UI.pillDht22) { UI.pillDht22.textContent = 'STANDBY'; UI.pillDht22.className = 'badge-status standby'; }
     if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-standby';
-    if (UI.scenarioDht) UI.scenarioDht.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+    if (UI.scenarioDht) UI.scenarioDht.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
 
-    // 4. IR Proximity
-    if (UI.valIr) { UI.valIr.textContent = '—'; UI.valIr.className = 'metric-compact no-data'; }
+    // 4. IR / HC-SR04 Proximity
+    if (UI.valIr) { UI.valIr.textContent = '— cm'; UI.valIr.className = 'metric-compact no-data'; }
     if (UI.pillIr) { UI.pillIr.textContent = 'STANDBY'; UI.pillIr.className = 'badge-status standby'; }
     if (UI.cardIr) UI.cardIr.className = 'apple-widget state-standby';
-    if (UI.scenarioIr) UI.scenarioIr.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+    if (UI.scenarioIr) UI.scenarioIr.textContent = 'HC-SR04 ultrasonic proximity awaiting USB connection.';
 
     // 5. MPU-6050 G-Force
     if (UI.valGforce) { UI.valGforce.textContent = '— G'; UI.valGforce.className = 'metric-compact no-data'; }
     if (UI.concussionBadge) { UI.concussionBadge.textContent = 'STANDBY'; UI.concussionBadge.className = 'badge-status standby'; }
-    if (UI.barGforce) UI.barGforce.style.width = '0%';
+    if (UI.barGforce) { UI.barGforce.style.width = '0%'; UI.barGforce.className = 'threshold-bar'; }
     if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-standby';
-    if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+    if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
 
-    // 6. Actuators & Biometrics
+    // 6. Actuators & C2
     if (UI.cardHardwareC2) UI.cardHardwareC2.className = 'apple-widget state-nominal';
     if (UI.scenarioHw) UI.scenarioHw.textContent = 'Hardware GPIO bus active. 5.0V power rail stabilized.';
+    if (UI.valBuzzer) UI.valBuzzer.textContent = 'STANDBY';
 
+    // 7. Biometrics
     if (UI.valBpm) { UI.valBpm.textContent = '— BPM'; UI.valBpm.className = 'bio-num no-data'; }
     if (UI.valSpo2) { UI.valSpo2.textContent = '— %'; UI.valSpo2.className = 'bio-num no-data'; }
     if (UI.valTemp) { UI.valTemp.textContent = '— °C'; UI.valTemp.className = 'bio-num no-data'; }
@@ -2042,7 +2056,6 @@ function updateDashboardUI(t) {
     if (UI.cardTerminal) UI.cardTerminal.className = 'apple-widget state-nominal';
     if (UI.scenarioTerm) UI.scenarioTerm.textContent = 'Direct hardware UART ingestion stream via Web Serial API.';
 
-    if (UI.valBuzzer) UI.valBuzzer.textContent = 'STANDBY';
     UI.incidentBanner?.classList.add('hidden');
     return;
   }
@@ -2050,105 +2063,113 @@ function updateDashboardUI(t) {
   // --- LIVE TELEMETRY POPULATION ---
 
   // 1. MPU-6050 Orientation & Ballistic Impact
-  if (t.gforce !== null) {
+  // Firmware sends gforce pre-computed; fallback to 1G if zero (Earth baseline)
+  const liveG = (t.gforce !== null && !isNaN(t.gforce)) ? Math.max(0, Number(t.gforce)) : null;
+  if (liveG !== null) {
     if (UI.valGforce) {
-      UI.valGforce.textContent = `${Number(t.gforce).toFixed(2)} G`;
+      UI.valGforce.textContent = `${liveG.toFixed(2)} G`;
       UI.valGforce.className = 'metric-compact';
     }
-    const gPct = Math.min(100, (t.gforce / 6.0) * 100);
+    const gPct = Math.min(100, (liveG / 6.0) * 100);
     if (UI.barGforce) UI.barGforce.style.width = `${gPct}%`;
 
-    if (t.gforce >= 4.5 || t.concussion) {
+    if (liveG >= 4.5 || t.concussion) {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'TBI IMPACT!'; UI.concussionBadge.className = 'badge-status danger'; }
       if (UI.barGforce) UI.barGforce.className = 'threshold-bar danger';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-danger open';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'TBI CONCUSSION BREACH: High-G blast deflection shock (>= 4.5 G)! Black-box impact logged.';
-    } else if (t.gforce >= 2.5) {
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `TBI CONCUSSION BREACH: ${liveG.toFixed(2)} G detected! Black-box impact logged.`;
+    } else if (liveG >= 2.5) {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'HIGH SHOCK'; UI.concussionBadge.className = 'badge-status warn'; }
       if (UI.barGforce) UI.barGforce.className = 'threshold-bar warn';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-warning';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'High Shock Impulse: 2.5G–4.5G kinetic load detected. Parachute/vehicle recoil logged.';
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Shock: ${liveG.toFixed(2)} G kinetic load — 2.5G–4.5G envelope.`;
     } else {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'ROUTINE'; UI.concussionBadge.className = 'badge-status safe'; }
       if (UI.barGforce) UI.barGforce.className = 'threshold-bar safe';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-nominal';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'Kinetic Baseline Normal: Routine head motion within benign physiological bounds (< 2.5 G).';
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Kinetic Baseline: ${liveG.toFixed(2)} G — normal physiological motion.`;
     }
   }
 
-  // 2. MQ-135 Hazardous Gases — show calibrated PPM with raw AO subtext
-  if (t.gasPpm !== null) {
-    const gasAoSubtext = t.mq135Ao !== null ? ` (${t.mq135Ao} AO)` : '';
+  // 2. MQ-135 Gas — show calibrated PPM; AO subtext only in text-protocol mode
+  if (t.gasPpm !== null && !isNaN(t.gasPpm)) {
+    const ppm = Math.round(t.gasPpm);
+    const aoSub = (t.mq135Ao !== null) ? ` (${t.mq135Ao} AO)` : '';
     if (UI.valGas) {
-      UI.valGas.textContent = `${Math.round(t.gasPpm)} PPM${gasAoSubtext}`;
+      UI.valGas.textContent = `${ppm} PPM${aoSub}`;
       UI.valGas.className = 'metric-compact';
     }
-    // Progress bar: 0–2000 PPM range
-    const gasPct = Math.min(100, (t.gasPpm / 2000) * 100);
+    const gasPct = Math.min(100, (ppm / 2000) * 100);
     if (UI.barGas) UI.barGas.style.width = `${gasPct}%`;
 
-    if (t.gasPpm > 1400 || t.mq135Do === 0) {
-      if (UI.pillGas) { UI.pillGas.textContent = 'TOXIC TRIP!'; UI.pillGas.className = 'badge-status danger'; }
+    if (ppm > 1400 || t.mq135Do === 0) {
+      if (UI.pillGas) { UI.pillGas.textContent = 'TOXIC!'; UI.pillGas.className = 'badge-status danger'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar danger';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-danger open';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `CRITICAL: Toxic Chemical / CBRN Vapor breach (${Math.round(t.gasPpm)} PPM)! Auto-purging filter valve.`;
-    } else if (t.gasPpm > 800) {
-      if (UI.pillGas) { UI.pillGas.textContent = 'ELEVATED VOC'; UI.pillGas.className = 'badge-status warn'; }
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `CBRN BREACH: ${ppm} PPM — toxic vapour threshold exceeded! Purge filter.`;
+    } else if (ppm > 800) {
+      if (UI.pillGas) { UI.pillGas.textContent = 'ELEVATED'; UI.pillGas.className = 'badge-status warn'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar warn';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-warning';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `Warning: Elevated VOC accumulation (${Math.round(t.gasPpm)} PPM, 800–1400 PPM range). Active purge recommended.`;
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `Elevated VOC: ${ppm} PPM — combustion fumes detected. Active purge advised.`;
     } else {
       if (UI.pillGas) { UI.pillGas.textContent = 'OPTIMAL'; UI.pillGas.className = 'badge-status safe'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar safe';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-nominal';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `Air Quality Optimal: ${Math.round(t.gasPpm)} PPM — all VOCs, smoke, and CO₂ within safe physiological limits.`;
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `Air Quality: ${ppm} PPM — clean atmosphere, VOCs within safe limits.`;
     }
   }
 
-  // 3. MQ-7 Carbon Monoxide (CO) — show calibrated PPM with raw AO subtext
-  if (t.coPpm !== null) {
-    const coAoSubtext = t.mq7Ao !== null ? ` (${t.mq7Ao} AO)` : '';
+  // 3. MQ-7 CO — text protocol only; in JSON mode, remain standby with note
+  if (t.coPpm !== null && !isNaN(t.coPpm)) {
+    const ppm = Math.round(t.coPpm);
+    const aoSub = (t.mq7Ao !== null) ? ` (${t.mq7Ao} AO)` : '';
     if (UI.valCo) {
-      UI.valCo.textContent = `${Math.round(t.coPpm)} PPM${coAoSubtext}`;
+      UI.valCo.textContent = `${ppm} PPM${aoSub}`;
       UI.valCo.className = 'metric-compact';
     }
-    // Progress bar: 0–200 PPM range (IDLH is 100 PPM)
-    const coPct = Math.min(100, (t.coPpm / 200) * 100);
+    const coPct = Math.min(100, (ppm / 200) * 100);
     if (UI.barCo) UI.barCo.style.width = `${coPct}%`;
 
-    if (t.coPpm > 100 || t.mq7Do === 0) {
+    if (ppm > 100 || t.mq7Do === 0) {
       if (UI.pillCo) { UI.pillCo.textContent = 'LETHAL CO!'; UI.pillCo.className = 'badge-status danger'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar danger';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-danger open';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `LETHAL HAZARD: CO ${Math.round(t.coPpm)} PPM — NIOSH IDLH ceiling (100 PPM) breached! Evacuate immediately.`;
-    } else if (t.coPpm > 35) {
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `LETHAL: CO ${ppm} PPM — NIOSH IDLH 100 PPM breached! Evacuate.`;
+    } else if (ppm > 35) {
       if (UI.pillCo) { UI.pillCo.textContent = 'WARNING CO'; UI.pillCo.className = 'badge-status warn'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar warn';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-warning';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `Warning: CO ${Math.round(t.coPpm)} PPM — exceeds OSHA 35 PPM PEL. Ventilate breathing chamber.`;
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Warning: ${ppm} PPM exceeds OSHA 35 PPM PEL. Ventilate.`;
     } else {
       if (UI.pillCo) { UI.pillCo.textContent = 'SAFE CO'; UI.pillCo.className = 'badge-status safe'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar safe';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-nominal';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Nominal: ${Math.round(t.coPpm)} PPM — well below OSHA PEL 35 PPM. Zero combustion blowback detected.`;
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Nominal: ${ppm} PPM — well below OSHA PEL 35 PPM.`;
     }
+  } else if (state.hasLiveStream && t.coPpm === null) {
+    // JSON firmware mode: MQ-7 not wired. Show informational standby.
+    if (UI.pillCo) { UI.pillCo.textContent = 'N/A'; UI.pillCo.className = 'badge-status standby'; }
+    if (UI.valCo) { UI.valCo.textContent = 'N/A'; UI.valCo.className = 'metric-compact no-data'; }
+    if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-standby';
+    if (UI.scenarioCo) UI.scenarioCo.textContent = 'MQ-7 sensor not in current firmware build. Add MQ7 AO line to firmware to activate.';
   }
 
   // 4. DHT22 Micro-Climate
-  if (t.ambientTemp !== null) {
+  if (t.ambientTemp !== null && !isNaN(t.ambientTemp)) {
     if (UI.valAmbTemp) {
       UI.valAmbTemp.textContent = `${Number(t.ambientTemp).toFixed(1)} °C`;
       UI.valAmbTemp.className = 'split-val';
     }
   }
-  if (t.humidity !== null) {
+  if (t.humidity !== null && !isNaN(t.humidity)) {
     if (UI.valHumidity) {
       UI.valHumidity.textContent = `${Number(t.humidity).toFixed(1)} %`;
       UI.valHumidity.className = 'split-val';
     }
   }
 
-  if (t.ambientTemp !== null && t.humidity !== null) {
+  if (t.ambientTemp !== null && !isNaN(t.ambientTemp) && t.humidity !== null && !isNaN(t.humidity)) {
     if (UI.valDhtSummary) {
       UI.valDhtSummary.textContent = `${Number(t.ambientTemp).toFixed(1)}°C / ${Math.round(t.humidity)}%`;
       UI.valDhtSummary.className = 'metric-compact';
@@ -2166,25 +2187,55 @@ function updateDashboardUI(t) {
       if (t.ambientTemp >= 38.0) {
         if (UI.pillDht22) { UI.pillDht22.textContent = 'HEAT STROKE'; UI.pillDht22.className = 'badge-status danger'; }
         if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-danger open';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = 'HEAT STROKE ALERT: Internal visor temperature >= 38.0°C! US Army Category 5 danger.';
+        if (UI.scenarioDht) UI.scenarioDht.textContent = `HEAT STROKE: ${t.ambientTemp.toFixed(1)}°C / ${t.humidity.toFixed(0)}% RH — US Army Cat 5 danger!`;
       } else if (t.ambientTemp >= 32.0 || isFogRisk) {
         if (UI.pillDht22) { UI.pillDht22.textContent = isFogRisk ? 'FOG RISK' : 'HEAT FATIGUE'; UI.pillDht22.className = 'badge-status warn'; }
         if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-warning';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = isFogRisk ? 'Fogging Hazard: Internal humidity >= 75% — Dew point condensation trips marksmanship.' : 'Thermal Strain: Internal temperature 32.0°C–38.0°C. Hydration pacing advised.';
+        if (UI.scenarioDht) UI.scenarioDht.textContent = isFogRisk
+          ? `Fog Risk: ${t.humidity.toFixed(0)}% RH — dew point ${dew.toFixed(1)}°C, condensation imminent.`
+          : `Thermal Strain: ${t.ambientTemp.toFixed(1)}°C — 32–38°C heat fatigue zone.`;
       } else {
         if (UI.pillDht22) { UI.pillDht22.textContent = 'OPTIMAL'; UI.pillDht22.className = 'badge-status safe'; }
         if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-nominal';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = 'Visor Micro-Climate Optimal: Anti-fog clear, moisture regulated, core thermal homeostasis maintained.';
+        if (UI.scenarioDht) UI.scenarioDht.textContent = `Micro-Climate OK: ${t.ambientTemp.toFixed(1)}°C / ${t.humidity.toFixed(0)}% RH — anti-fog clear.`;
       }
+    }
+  } else if (t.ambientTemp !== null || t.humidity !== null) {
+    // Partial data: one reading arrived, show what we have
+    if (UI.valDhtSummary) {
+      const tStr = t.ambientTemp !== null ? `${t.ambientTemp.toFixed(1)}°C` : '—°C';
+      const hStr = t.humidity !== null ? `${t.humidity.toFixed(0)}%` : '—%';
+      UI.valDhtSummary.textContent = `${tStr} / ${hStr}`;
+      UI.valDhtSummary.className = 'metric-compact';
     }
   }
 
-  // 5. IR Face Shield
-  if (t.irStatus !== null) {
+  // 5. IR + HC-SR04 Proximity — show ultrasonic distance in JSON mode
+  const distCm = (t.distCm !== null && !isNaN(t.distCm)) ? Number(t.distCm) : null;
+  const irActive = t.irStatus !== null;
+
+  if (distCm !== null) {
+    // HC-SR04 ultrasonic data from firmware JSON
     if (UI.valIr) {
-      UI.valIr.textContent = t.irStatus;
+      UI.valIr.textContent = `${Math.round(distCm)} cm`;
       UI.valIr.className = 'metric-compact';
     }
+    if (distCm < 15) {
+      if (UI.pillIr) { UI.pillIr.textContent = 'OBSTACLE!'; UI.pillIr.className = 'badge-status warn'; }
+      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
+      if (UI.scenarioIr) UI.scenarioIr.textContent = `Proximity Alert: Object ${Math.round(distCm)} cm ahead — close-quarters obstacle detected.`;
+    } else if (distCm < 50) {
+      if (UI.pillIr) { UI.pillIr.textContent = 'NEAR'; UI.pillIr.className = 'badge-status warn'; }
+      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
+      if (UI.scenarioIr) UI.scenarioIr.textContent = `Near Object: ${Math.round(distCm)} cm — obstacle in close tactical range.`;
+    } else {
+      if (UI.pillIr) { UI.pillIr.textContent = 'CLEAR'; UI.pillIr.className = 'badge-status safe'; }
+      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-nominal';
+      if (UI.scenarioIr) UI.scenarioIr.textContent = `Clear: ${Math.round(distCm)} cm — no obstacles in tactical detection cone.`;
+    }
+  } else if (irActive) {
+    // IR text-protocol fallback
+    if (UI.valIr) { UI.valIr.textContent = t.irStatus; UI.valIr.className = 'metric-compact'; }
     if (t.irStatus.includes('OBSTACLE') || t.irStatus.includes('DETECT')) {
       if (UI.pillIr) { UI.pillIr.textContent = 'OBSTACLE'; UI.pillIr.className = 'badge-status warn'; }
       if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
@@ -2392,14 +2443,32 @@ async function readSerialStream() {
 
 // 100% Real Protocol Parser for ESP32 Output
 function handleIncomingSerialLine(raw) {
-  state.packetCount++;
-  state.lastPacketTime = Date.now();
-  state.hasLiveStream = true;
+  // Skip UART noise: separator lines (========), empty lines, just CR/LF
+  if (raw.length === 0) return;
+  if (/^[=\-_\s]+$/.test(raw)) return;  // separator lines like ===========
 
-  if (UI.packetCounter) {
-    UI.packetCounter.textContent = `${state.packetCount} PKTS`;
+  // Only count as telemetry packet if it's JSON (structured data)
+  const isJson = raw.startsWith('{') && raw.endsWith('}');
+  if (isJson) {
+    state.packetCount++;
+    state.lastPacketTime = Date.now();
+    state.hasLiveStream = true;
+    if (UI.packetCounter) UI.packetCounter.textContent = `${state.packetCount} PKTS`;
+  } else if (!state.hasLiveStream) {
+    // Even non-JSON lines prove we have a live connection
+    state.hasLiveStream = true;
   }
-  logTerminal(raw);
+
+  // Flash the RX badge in the header button
+  const rxBadge = document.querySelector('.live-rx-badge');
+  if (rxBadge) {
+    rxBadge.classList.add('rx-flash');
+    clearTimeout(rxBadge._timer);
+    rxBadge._timer = setTimeout(() => rxBadge.classList.remove('rx-flash'), 120);
+  }
+
+  logTerminal(raw, isJson ? 'rx' : 'dim');
+
 
   // Check if payload is JSON (primary firmware output format)
   if (raw.startsWith('{') && raw.endsWith('}')) {
@@ -2732,32 +2801,35 @@ function toggleSimulator() {
 // ============================================================================
 // 8. TACTICAL SERIAL CONSOLE DRAWER
 // ============================================================================
-function logTerminal(text) {
+function logTerminal(text, lineClass) {
   // Log to both the widget terminal and the fullscreen drawer
   const targets = [UI.terminalBody, document.getElementById('drawer-terminal-body')];
   targets.forEach(el => {
     if (!el) return;
     const line = document.createElement('div');
-    const isRx = text.startsWith('[') || text.startsWith('>>>');
-    line.className = isRx ? 't-line rx' : 't-line';
+    // Determine line class from explicit arg, or auto-detect
+    let cls = lineClass || (text.startsWith('[') ? 'rx' : 'rx');
+    line.className = `t-line ${cls}`;
     const now = new Date();
     const timeStr = now.toTimeString().split(' ')[0];
-    // Mark incoming serial data clearly
-    const prefix = !text.startsWith('[') ? '[RX]' : '';
-    line.textContent = `[${timeStr}] ${prefix} ${text}`.replace('  ', ' ');
+    line.textContent = `[${timeStr}] ${text}`;
     el.appendChild(line);
-    if (el.children.length > 150) el.removeChild(el.firstChild);
+    // Cap at 300 lines to prevent memory growth
+    if (el.children.length > 300) el.removeChild(el.firstChild);
     el.scrollTop = el.scrollHeight;
   });
 
-  // Flash the RX badge on the header button
-  const rxBadge = document.getElementById('live-rx-indicator');
+  // Flash the RX badge on the header button (both id and class selector)
+  const rxBadge = document.getElementById('live-rx-indicator') || document.querySelector('.live-rx-badge');
   if (rxBadge) {
     rxBadge.classList.add('rx-flash');
     clearTimeout(rxBadge._flashTimer);
     rxBadge._flashTimer = setTimeout(() => rxBadge.classList.remove('rx-flash'), 180);
   }
 }
+
+
+
 
 function toggleSerialConsole() {
   const drawer = document.getElementById('serial-console-drawer');

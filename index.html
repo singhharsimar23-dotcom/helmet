@@ -84,6 +84,15 @@
         <span id="btn-demo-text">TEST HARNESS</span>
       </button>
 
+      <button id="btn-toggle-terminal" class="btn-tool" title="Open ESP32 Hardware Serial Monitor & Command Console">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4 17 10 11 4 5" />
+          <line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+        <span id="btn-term-text">SERIAL CONSOLE</span>
+        <span class="live-rx-badge" id="live-rx-indicator"></span>
+      </button>
+
       <button id="btn-theme-toggle" class="btn-tool theme-toggle" title="Switch Theme (Light / Dark Mode)">
         <span id="theme-icon">☀️</span>
         <span id="theme-text">LIGHT</span>
@@ -131,7 +140,7 @@
             <span class="widget-sub-title">Breathing Zone Inhalation Quality</span>
           </div>
           <div class="widget-headline-val">
-            <span class="metric-compact no-data" id="val-gas">— AO</span>
+            <span class="metric-compact no-data" id="val-gas">— PPM</span>
           </div>
         </div>
 
@@ -150,7 +159,7 @@
             <div class="threshold-bar" id="bar-gas" style="width: 0%;"></div>
           </div>
           <div class="threshold-scale">
-            <span class="scale-item safe">SAFE &lt;800</span>
+            <span class="scale-item safe">SAFE &lt;800 PPM</span>
             <span class="scale-item warn">ELEV 800–1400</span>
             <span class="scale-item danger">CRIT &gt;1400</span>
           </div>
@@ -192,7 +201,7 @@
             <span class="widget-sub-title">Combustion &amp; Blast Blowback</span>
           </div>
           <div class="widget-headline-val">
-            <span class="metric-compact no-data" id="val-co">— AO</span>
+            <span class="metric-compact no-data" id="val-co">— PPM</span>
           </div>
         </div>
 
@@ -209,9 +218,9 @@
             <div class="threshold-bar" id="bar-co" style="width: 0%;"></div>
           </div>
           <div class="threshold-scale">
-            <span class="scale-item safe">SAFE &lt;400</span>
-            <span class="scale-item warn">ELEV 400–900</span>
-            <span class="scale-item danger">LETHAL &gt;900</span>
+            <span class="scale-item safe">SAFE &lt;35 PPM</span>
+            <span class="scale-item warn">ELEV 35–100 PPM</span>
+            <span class="scale-item danger">LETHAL &gt;100 PPM</span>
           </div>
 
           <div class="drawer-protocol-box">
@@ -831,6 +840,48 @@
           <!-- Dynamic control buttons populated based on widget -->
         </div>
         <button id="btn-done-widget-modal" class="btn-primary-action">CLOSE INSPECTOR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TACTICAL SERIAL CONSOLE DRAWER (slide-up, full-width, fixed bottom) -->
+  <div id="serial-console-drawer" class="serial-console-drawer">
+    <div class="drawer-header">
+      <div class="drawer-header-left">
+        <span class="drawer-dot"></span>
+        <span class="drawer-chip">UART BRIDGE // CP2102</span>
+        <span class="drawer-title">TACTICAL SERIAL CONSOLE</span>
+        <span class="drawer-baud">115200 BAUD · 8-N-1</span>
+      </div>
+      <div class="drawer-header-right">
+        <span class="drawer-port-status" id="drawer-port-label">⬤ DISCONNECTED</span>
+        <button class="btn-mini" id="btn-clear-drawer">CLEAR</button>
+        <button class="btn-mini drawer-close-btn" onclick="toggleSerialConsole()">✕ CLOSE</button>
+      </div>
+    </div>
+
+    <!-- COM Port busy warning -->
+    <div class="drawer-warning-bar" id="drawer-busy-warning">
+      <span>⚠</span>
+      <span>If COM4 is in use, close <strong>Arduino IDE</strong> first, then click CONNECT USB. Windows locks serial ports exclusively.</span>
+    </div>
+
+    <!-- Live scrolling feed -->
+    <div class="drawer-terminal" id="drawer-terminal-body">
+      <div class="t-line dim">[INIT] Tactical Serial Console ready. Awaiting hardware link at 115200 baud.</div>
+    </div>
+
+    <!-- Transmit controls row -->
+    <div class="drawer-tx-row">
+      <span class="drawer-tx-label">TRANSMIT:</span>
+      <button class="btn-tx" id="btn-tx-tare" data-cmd="TARE">TARE</button>
+      <button class="btn-tx" id="btn-tx-status" data-cmd="STATUS">STATUS</button>
+      <button class="btn-tx" id="btn-tx-buzz-on" data-cmd="BUZZER_ON">BUZZER ON</button>
+      <button class="btn-tx" id="btn-tx-buzz-off" data-cmd="BUZZER_OFF">BUZZER OFF</button>
+      <button class="btn-tx" id="btn-tx-ping" data-cmd="PING">PING</button>
+      <div class="drawer-tx-custom">
+        <input type="text" id="serial-tx-input" class="drawer-tx-input" placeholder="Custom command…" autocomplete="off" spellcheck="false">
+        <button class="btn-tx accent" id="btn-tx-custom">SEND ↵</button>
       </div>
     </div>
   </div>

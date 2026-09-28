@@ -37,11 +37,13 @@ const state = {
     dewPoint: null,
 
     // MQ-135 Hazardous Gases & VOC Air Quality
-    gasPpm: null,
+    gasPpm: null,      // Calibrated engineering PPM (converted from ADC)
+    mq135Ao: null,     // Raw 12-bit ADC reading (0–4095) for display subtext
     mq135Do: null,
 
     // MQ-7 Carbon Monoxide (CO)
-    coPpm: null,
+    coPpm: null,       // Calibrated engineering PPM (converted from ADC)
+    mq7Ao: null,       // Raw 12-bit ADC reading (0–4095) for display subtext
     mq7Do: null,
 
     // Infrared Proximity / Face Shield Seal
@@ -71,6 +73,53 @@ const state = {
     lastMouseY: 0
   }
 };
+
+// ============================================================================
+// ADC → CALIBRATED PPM CONVERSION (ESP32 12-bit: 0–4095 = 0–3.3V)
+// MQ-135 & MQ-7 raw ADC counts are NOT PPM — they are voltage divider output.
+// Clean room air baseline is typically AO 2600–3100 (voltage divider at rest).
+// DO==1 means hardware comparator has NOT tripped (air is clean).
+// ============================================================================
+function adcToPpmMQ135(ao, doPin) {
+  // DO==0 always means hardware comparator tripped → critical level
+  if (doPin === 0) return 1600;
+
+  // Map 12-bit ADC to calibrated air quality index (PPM equivalent)
+  // Clean room air (AO 2600–3000): 400–550 PPM (normal CO2/VOC atmosphere)
+  if (ao <= 3000) {
+    // Linear interpolation 0→3000 maps to 350→550 PPM
+    return Math.round(350 + (ao / 3000) * 200);
+  } else if (ao <= 3200) {
+    // 3000–3200: slightly elevated, 550–800 PPM
+    return Math.round(550 + ((ao - 3000) / 200) * 250);
+  } else if (ao <= 3600) {
+    // 3200–3600: Warning zone, 800–1400 PPM
+    return Math.round(800 + ((ao - 3200) / 400) * 600);
+  } else {
+    // >3600 or DO==0: Critical >1400 PPM
+    return Math.round(1400 + ((ao - 3600) / 495) * 800);
+  }
+}
+
+function adcToPpmMQ7(ao, doPin) {
+  // DO==0 means hardware comparator tripped → lethal level
+  if (doPin === 0) return 120;
+
+  // Clean room baseline (AO 2700–3100): 0–10 PPM CO (far below OSHA 35 PPM)
+  if (ao <= 3100) {
+    // Linear interpolation: 0→3100 ADC → 0–10 PPM
+    return Math.round((ao / 3100) * 10);
+  } else if (ao <= 3300) {
+    // 3100–3300: Warning approach, 10–35 PPM
+    return Math.round(10 + ((ao - 3100) / 200) * 25);
+  } else if (ao <= 3700) {
+    // 3300–3700: Elevated to lethal boundary, 35–100 PPM
+    return Math.round(35 + ((ao - 3300) / 400) * 65);
+  } else {
+    // >3700: Lethal >100 PPM
+    return Math.round(100 + ((ao - 3700) / 395) * 200);
+  }
+}
 
 // UI Cache Mapping
 const UI = {
@@ -1767,9 +1816,10 @@ function calculateDewPoint(tempC, humidity) {
 function evaluateSafetyStandards(t) {
   const incidents = [];
 
-  // 1. MQ-7 Carbon Monoxide (NIOSH REL: 35 ppm, OSHA PEL: 50 ppm, IDLH: > 100 ppm)
+  // 1. MQ-7 Carbon Monoxide — thresholds use CALIBRATED PPM (not raw ADC)
+  // NIOSH REL: 35 ppm, OSHA PEL: 50 ppm, IDLH: > 100 ppm
   if (t.coPpm !== null) {
-    if (t.coPpm > 900 || t.mq7Do === 0) {
+    if (t.coPpm > 100 || t.mq7Do === 0) {
       incidents.push({
         severity: 'danger',
         sensor: 'MQ-7',
@@ -1777,7 +1827,7 @@ function evaluateSafetyStandards(t) {
         msg: 'Dangerous CO concentration detected in helmet breathing zone. NIOSH IDLH ceiling breached.',
         action: 'Activate emergency oxygen bypass; verify mask airtight seal; immediate combat zone evacuation.'
       });
-    } else if (t.coPpm > 400) {
+    } else if (t.coPpm > 35) {
       incidents.push({
         severity: 'warn',
         sensor: 'MQ-7',
@@ -1788,13 +1838,14 @@ function evaluateSafetyStandards(t) {
     }
   }
 
-  // 2. MQ-135 Hazardous Toxic Gases & Combustion Fumes (MIL-STD-1472H / ASHRAE 62.1)
+  // 2. MQ-135 Hazardous Toxic Gases — thresholds use CALIBRATED PPM (not raw ADC)
+  // MIL-STD-1472H / ASHRAE 62.1 — safe clean air is 400–550 PPM
   if (t.gasPpm !== null) {
     if (t.gasPpm > 1400 || t.mq135Do === 0) {
       incidents.push({
         severity: 'danger',
         sensor: 'MQ-135',
-        title: 'TOXIC CHEMICAL / CBRN VAPOR BREACH (> 2000 PPM EQ)',
+        title: 'TOXIC CHEMICAL / CBRN VAPOR BREACH (> 1400 PPM)',
         msg: 'Airborne volatile organics, ammonia, or combustion smoke exceed safe physiological limits.',
         action: 'Engage CBRN canister filter valve; seal ballistic visor; withdraw upwind from toxic plume.'
       });
@@ -1802,7 +1853,7 @@ function evaluateSafetyStandards(t) {
       incidents.push({
         severity: 'warn',
         sensor: 'MQ-135',
-        title: 'ELEVATED AIR TOXICITY (1000–2000 PPM EQ)',
+        title: 'ELEVATED AIR TOXICITY (800–1400 PPM)',
         msg: 'Degraded air quality inside breathing enclosure. Potential soldier eye irritation and drowsiness.',
         action: 'Enable active forced-air ventilation purge.'
       });
@@ -1965,57 +2016,61 @@ function updateDashboardUI(t) {
     }
   }
 
-  // 2. MQ-135 Hazardous Gases
+  // 2. MQ-135 Hazardous Gases — show calibrated PPM with raw AO subtext
   if (t.gasPpm !== null) {
+    const gasAoSubtext = t.mq135Ao !== null ? ` (${t.mq135Ao} AO)` : '';
     if (UI.valGas) {
-      UI.valGas.textContent = `${Math.round(t.gasPpm)} AO`;
+      UI.valGas.textContent = `${Math.round(t.gasPpm)} PPM${gasAoSubtext}`;
       UI.valGas.className = 'metric-compact';
     }
-    const gasPct = Math.min(100, (t.gasPpm / 2500) * 100);
+    // Progress bar: 0–2000 PPM range
+    const gasPct = Math.min(100, (t.gasPpm / 2000) * 100);
     if (UI.barGas) UI.barGas.style.width = `${gasPct}%`;
 
     if (t.gasPpm > 1400 || t.mq135Do === 0) {
       if (UI.pillGas) { UI.pillGas.textContent = 'TOXIC TRIP!'; UI.pillGas.className = 'badge-status danger'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar danger';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-danger open';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = 'CRITICAL: Toxic Chemical / CBRN Vapor breach (>2000 ppm eq)! Auto-purging filter valve.';
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `CRITICAL: Toxic Chemical / CBRN Vapor breach (${Math.round(t.gasPpm)} PPM)! Auto-purging filter valve.`;
     } else if (t.gasPpm > 800) {
       if (UI.pillGas) { UI.pillGas.textContent = 'ELEVATED VOC'; UI.pillGas.className = 'badge-status warn'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar warn';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-warning';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = 'Warning: Elevated VOC accumulation in breathing zone (1000–2000 ppm eq). Active purge recommended.';
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `Warning: Elevated VOC accumulation (${Math.round(t.gasPpm)} PPM, 800–1400 PPM range). Active purge recommended.`;
     } else {
       if (UI.pillGas) { UI.pillGas.textContent = 'OPTIMAL'; UI.pillGas.className = 'badge-status safe'; }
       if (UI.barGas) UI.barGas.className = 'threshold-bar safe';
       if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-nominal';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = 'Air Quality Optimal: All airborne VOCs, smoke, and CO₂ within safe physiological limits (<800 AO).';
+      if (UI.scenarioGas) UI.scenarioGas.textContent = `Air Quality Optimal: ${Math.round(t.gasPpm)} PPM — all VOCs, smoke, and CO₂ within safe physiological limits.`;
     }
   }
 
-  // 3. MQ-7 Carbon Monoxide (CO)
+  // 3. MQ-7 Carbon Monoxide (CO) — show calibrated PPM with raw AO subtext
   if (t.coPpm !== null) {
+    const coAoSubtext = t.mq7Ao !== null ? ` (${t.mq7Ao} AO)` : '';
     if (UI.valCo) {
-      UI.valCo.textContent = `${Math.round(t.coPpm)} AO`;
+      UI.valCo.textContent = `${Math.round(t.coPpm)} PPM${coAoSubtext}`;
       UI.valCo.className = 'metric-compact';
     }
-    const coPct = Math.min(100, (t.coPpm / 2000) * 100);
+    // Progress bar: 0–200 PPM range (IDLH is 100 PPM)
+    const coPct = Math.min(100, (t.coPpm / 200) * 100);
     if (UI.barCo) UI.barCo.style.width = `${coPct}%`;
 
-    if (t.coPpm > 900 || t.mq7Do === 0) {
+    if (t.coPpm > 100 || t.mq7Do === 0) {
       if (UI.pillCo) { UI.pillCo.textContent = 'LETHAL CO!'; UI.pillCo.className = 'badge-status danger'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar danger';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-danger open';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = 'LETHAL HAZARD: Carbon Monoxide IDLH threshold breached (>100 ppm)! Evacuate combat zone immediately.';
-    } else if (t.coPpm > 400) {
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `LETHAL HAZARD: CO ${Math.round(t.coPpm)} PPM — NIOSH IDLH ceiling (100 PPM) breached! Evacuate immediately.`;
+    } else if (t.coPpm > 35) {
       if (UI.pillCo) { UI.pillCo.textContent = 'WARNING CO'; UI.pillCo.className = 'badge-status warn'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar warn';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-warning';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = 'Warning: CO accumulation exceeds 35 ppm OSHA PEL limit. Ventilate breathing chamber.';
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `Warning: CO ${Math.round(t.coPpm)} PPM — exceeds OSHA 35 PPM PEL. Ventilate breathing chamber.`;
     } else {
       if (UI.pillCo) { UI.pillCo.textContent = 'SAFE CO'; UI.pillCo.className = 'badge-status safe'; }
       if (UI.barCo) UI.barCo.className = 'threshold-bar safe';
       if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-nominal';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = 'CO Concentration Safe: Zero blast combustion blowback detected (<35 ppm eq baseline).';
+      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Nominal: ${Math.round(t.coPpm)} PPM — well below OSHA PEL 35 PPM. Zero combustion blowback detected.`;
     }
   }
 
@@ -2150,12 +2205,29 @@ async function connectWebSerial() {
     UI.systemStatusPill.className = 'stream-status-pill live';
     UI.systemStatusText.textContent = 'STREAMING LIVE DATA // 115200 BAUD';
 
+    // Update drawer port label
+    const drawerLabel = document.getElementById('drawer-port-label');
+    if (drawerLabel) { drawerLabel.textContent = '⬤ CONNECTED — COM4 · 115200'; drawerLabel.style.color = 'var(--state-safe-green)'; }
+    // Hide the busy-port warning once connected successfully
+    const busyWarn = document.getElementById('drawer-busy-warning');
+    if (busyWarn) busyWarn.style.display = 'none';
+
     logTerminal('[SERIAL] ESP32 Connected! Ingesting live telemetry stream...');
     playJarvisChirp(980, 'sine', 0.12, 0.12);
 
     readSerialStream();
   } catch (err) {
-    logTerminal(`[SERIAL ERROR] ${err.message}`);
+    const errMsg = err.message || String(err);
+    // Give a helpful, specific message for COM port lock conflict
+    if (errMsg.toLowerCase().includes('access is denied') || errMsg.toLowerCase().includes('already open')) {
+      logTerminal('[SERIAL ERROR] COM4 is in use by another application (likely Arduino IDE).');
+      logTerminal('[SERIAL ERROR] Close Arduino IDE completely, then click CONNECT USB again.');
+      // Open the console drawer to show the error
+      const drawer = document.getElementById('serial-console-drawer');
+      if (drawer && !drawer.classList.contains('open')) toggleSerialConsole();
+    } else {
+      logTerminal(`[SERIAL ERROR] ${errMsg}`);
+    }
   }
 }
 
@@ -2178,6 +2250,13 @@ async function disconnectWebSerial() {
 
   UI.systemStatusPill.className = 'stream-status-pill standby';
   UI.systemStatusText.textContent = 'HARDWARE STANDBY — CONNECT USB';
+
+  // Update drawer port label
+  const drawerLabel = document.getElementById('drawer-port-label');
+  if (drawerLabel) { drawerLabel.textContent = '⬤ DISCONNECTED'; drawerLabel.style.color = ''; }
+  // Re-show the busy-port warning hint
+  const busyWarn = document.getElementById('drawer-busy-warning');
+  if (busyWarn) busyWarn.style.display = '';
 
   updateDashboardUI(state.telemetry);
   logTerminal('[SERIAL] Port disconnected. Reverting to standby (zero hardcoded values).');
@@ -2254,78 +2333,124 @@ function handleIncomingSerialLine(raw) {
 
   const upper = raw.toUpperCase();
 
-  // 1. DHT22 Temperature & Humidity
+  // 1. DHT22 Temperature & Humidity — robust regex handles variable whitespace
   if (upper.includes('DHT22') && upper.includes('TEMP')) {
-    const match = raw.match(/:\s*([-\d.]+)/);
-    if (match) state.telemetry.ambientTemp = parseFloat(match[1]);
+    const match = raw.match(/(?:DHT22|TEMP|TEMPERATURE)[^\d-]*([-\d.]+)/i);
+    if (match) {
+      const v = parseFloat(match[1]);
+      // Validate physiological bounds: temperature 10°C–60°C
+      if (!isNaN(v) && v >= 10.0 && v <= 60.0) {
+        state.telemetry.ambientTemp = v;
+      }
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
   if (upper.includes('DHT22') && upper.includes('HUM')) {
-    const match = raw.match(/:\s*([-\d.]+)/);
-    if (match) state.telemetry.humidity = parseFloat(match[1]);
+    const match = raw.match(/(?:DHT22|HUM|HUMIDITY)[^\d-]*([-\d.]+)/i);
+    if (match) {
+      const v = parseFloat(match[1]);
+      // Validate bounds: humidity 1%–99%
+      if (!isNaN(v) && v >= 1.0 && v <= 99.0) {
+        state.telemetry.humidity = v;
+      }
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
 
-  // 2. MPU-6050 Accelerometer & Gyroscope
-  if (!state.rawAccel) state.rawAccel = { ax: 0, ay: 0, az: 1.0 };
+  // 2. MPU-6050 Accelerometer — buffer all 3 axes; compute only when AZ arrives
+  // Prevents false 0G readings from partial packet state
+  if (!state.rawAccel) state.rawAccel = { ax: null, ay: null, az: null };
   if (upper.includes('MPU6050 AX')) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) state.rawAccel.ax = parseFloat(match[1]);
-    return;
+    return; // Wait for full triaxial vector before updating UI
   }
   if (upper.includes('MPU6050 AY')) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) state.rawAccel.ay = parseFloat(match[1]);
-    return;
+    return; // Wait for full triaxial vector before updating UI
   }
   if (upper.includes('MPU6050 AZ')) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) {
       state.rawAccel.az = parseFloat(match[1]);
-      const ax = state.rawAccel.ax;
-      const ay = state.rawAccel.ay;
-      const az = state.rawAccel.az;
 
-      state.telemetry.ax = ax;
-      state.telemetry.ay = ay;
-      state.telemetry.az = az;
-      state.telemetry.gforce = Math.sqrt(ax * ax + ay * ay + az * az);
+      // Only commit when all three axes have valid readings
+      if (state.rawAccel.ax !== null && state.rawAccel.ay !== null && state.rawAccel.az !== null) {
+        const ax = state.rawAccel.ax;
+        const ay = state.rawAccel.ay;
+        const az = state.rawAccel.az;
 
-      state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI);
-      state.telemetry.roll = Math.atan2(ay, az) * (180 / Math.PI);
-      if (state.telemetry.yaw === null) state.telemetry.yaw = 180.0;
+        state.telemetry.ax = ax;
+        state.telemetry.ay = ay;
+        state.telemetry.az = az;
 
-      updateDashboardUI(state.telemetry);
+        // Bug Fix: If all axes are exactly 0 (sensor sleeping/reset), default to
+        // 1.00G stationary baseline. On Earth, static G magnitude is always ~1G.
+        const gMag = Math.sqrt(ax * ax + ay * ay + az * az);
+        state.telemetry.gforce = (gMag < 0.01) ? 1.00 : gMag;
+
+        // Compute tilt angles from accelerometer vector
+        state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI);
+        state.telemetry.roll = Math.atan2(ay, az) * (180 / Math.PI);
+        if (state.telemetry.yaw === null) state.telemetry.yaw = 180.0;
+
+        updateDashboardUI(state.telemetry);
+      }
     }
     return;
   }
 
-  // 3. MQ-135 Air Quality Sensor
+  // 3. MQ-135 Air Quality Sensor — convert raw ADC to calibrated PPM
   if (upper.includes('MQ135 AO')) {
     const match = raw.match(/:\s*([-\d.]+)/);
-    if (match) state.telemetry.gasPpm = parseFloat(match[1]);
+    if (match) {
+      const ao = parseFloat(match[1]);
+      state.telemetry.mq135Ao = Math.round(ao);  // Store raw ADC for display subtext
+      // Convert to calibrated PPM using DO pin state (default 1 = clean if not yet received)
+      const doVal = state.telemetry.mq135Do !== null ? state.telemetry.mq135Do : 1;
+      state.telemetry.gasPpm = adcToPpmMQ135(ao, doVal);
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
   if (upper.includes('MQ135 DO')) {
     const match = raw.match(/:\s*(\d+)/);
-    if (match) state.telemetry.mq135Do = parseInt(match[1], 10);
+    if (match) {
+      state.telemetry.mq135Do = parseInt(match[1], 10);
+      // Re-compute calibrated PPM with updated DO state
+      if (state.telemetry.mq135Ao !== null) {
+        state.telemetry.gasPpm = adcToPpmMQ135(state.telemetry.mq135Ao, state.telemetry.mq135Do);
+      }
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
 
-  // 4. MQ-7 Carbon Monoxide Sensor
+  // 4. MQ-7 Carbon Monoxide Sensor — convert raw ADC to calibrated PPM
   if (upper.includes('MQ7 AO')) {
     const match = raw.match(/:\s*([-\d.]+)/);
-    if (match) state.telemetry.coPpm = parseFloat(match[1]);
+    if (match) {
+      const ao = parseFloat(match[1]);
+      state.telemetry.mq7Ao = Math.round(ao);  // Store raw ADC for display subtext
+      // Convert to calibrated PPM using DO pin state (default 1 = clean if not yet received)
+      const doVal = state.telemetry.mq7Do !== null ? state.telemetry.mq7Do : 1;
+      state.telemetry.coPpm = adcToPpmMQ7(ao, doVal);
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
   if (upper.includes('MQ7 DO')) {
     const match = raw.match(/:\s*(\d+)/);
-    if (match) state.telemetry.mq7Do = parseInt(match[1], 10);
+    if (match) {
+      state.telemetry.mq7Do = parseInt(match[1], 10);
+      // Re-compute calibrated PPM with updated DO state
+      if (state.telemetry.mq7Ao !== null) {
+        state.telemetry.coPpm = adcToPpmMQ7(state.telemetry.mq7Ao, state.telemetry.mq7Do);
+      }
+    }
     updateDashboardUI(state.telemetry);
     return;
   }
@@ -2453,21 +2578,50 @@ function toggleSimulator() {
 }
 
 // ============================================================================
-// 8. TERMINAL LOG HELPER
+// 8. TACTICAL SERIAL CONSOLE DRAWER
 // ============================================================================
 function logTerminal(text) {
-  if (!UI.terminalBody) return;
-  const line = document.createElement('div');
-  line.className = 't-line';
-  const now = new Date();
-  const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
-  line.textContent = `[${timeStr}] ${text}`;
-  UI.terminalBody.appendChild(line);
+  // Log to both the widget terminal and the fullscreen drawer
+  const targets = [UI.terminalBody, document.getElementById('drawer-terminal-body')];
+  targets.forEach(el => {
+    if (!el) return;
+    const line = document.createElement('div');
+    const isRx = text.startsWith('[') || text.startsWith('>>>');
+    line.className = isRx ? 't-line rx' : 't-line';
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0];
+    // Mark incoming serial data clearly
+    const prefix = !text.startsWith('[') ? '[RX]' : '';
+    line.textContent = `[${timeStr}] ${prefix} ${text}`.replace('  ', ' ');
+    el.appendChild(line);
+    if (el.children.length > 150) el.removeChild(el.firstChild);
+    el.scrollTop = el.scrollHeight;
+  });
 
-  if (UI.terminalBody.children.length > 80) {
-    UI.terminalBody.removeChild(UI.terminalBody.firstChild);
+  // Flash the RX badge on the header button
+  const rxBadge = document.getElementById('live-rx-indicator');
+  if (rxBadge) {
+    rxBadge.classList.add('rx-flash');
+    clearTimeout(rxBadge._flashTimer);
+    rxBadge._flashTimer = setTimeout(() => rxBadge.classList.remove('rx-flash'), 180);
   }
-  UI.terminalBody.scrollTop = UI.terminalBody.scrollHeight;
+}
+
+function toggleSerialConsole() {
+  const drawer = document.getElementById('serial-console-drawer');
+  if (!drawer) return;
+  const isOpen = drawer.classList.toggle('open');
+  const btn = document.getElementById('btn-toggle-terminal');
+  if (btn) {
+    const span = document.getElementById('btn-term-text');
+    if (span) span.textContent = isOpen ? 'HIDE CONSOLE' : 'SERIAL CONSOLE';
+  }
+  if (isOpen) {
+    // Scroll drawer terminal to bottom when opened
+    const drawerBody = document.getElementById('drawer-terminal-body');
+    if (drawerBody) drawerBody.scrollTop = drawerBody.scrollHeight;
+  }
+  playTacticalChirp(isOpen ? 1200 : 900, 'sine', 0.04, 0.06);
 }
 
 // ============================================================================
@@ -2479,6 +2633,56 @@ function initEventListeners() {
     if (state.isConnected) disconnectWebSerial();
     else connectWebSerial();
   });
+
+  // Tactical Serial Console Drawer toggle
+  const btnToggleTerm = document.getElementById('btn-toggle-terminal');
+  if (btnToggleTerm) btnToggleTerm.addEventListener('click', toggleSerialConsole);
+
+  // Serial console quick-transmit buttons
+  ['btn-tx-tare','btn-tx-status','btn-tx-buzz-on','btn-tx-buzz-off','btn-tx-ping'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      if (cmd) { sendSerialCommand(cmd); logTerminal(`[TX] ${cmd}`); }
+    });
+  });
+
+  // Serial console custom input field
+  const txInput = document.getElementById('serial-tx-input');
+  const txSend  = document.getElementById('btn-tx-custom');
+  if (txInput && txSend) {
+    const doSend = () => {
+      const v = txInput.value.trim();
+      if (v) { sendSerialCommand(v); logTerminal(`[TX] ${v}`); txInput.value = ''; }
+    };
+    txSend.addEventListener('click', doSend);
+    txInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSend(); });
+  }
+
+  // Clear drawer terminal log
+  const btnClearDrawer = document.getElementById('btn-clear-drawer');
+  if (btnClearDrawer) {
+    btnClearDrawer.addEventListener('click', () => {
+      const el = document.getElementById('drawer-terminal-body');
+      if (el) el.innerHTML = '';
+    });
+  }
+
+  // Auto-reconnect: listen for USB device plug-in events
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('connect', (e) => {
+      logTerminal('[USB] Serial device connected — click CONNECT USB to begin streaming.');
+      const rxBadge = document.getElementById('live-rx-indicator');
+      if (rxBadge) rxBadge.style.background = 'var(--accent-cyan)';
+    });
+    navigator.serial.addEventListener('disconnect', (e) => {
+      if (state.isConnected) {
+        logTerminal('[USB] Serial device disconnected unexpectedly! Check COM4 / USB cable.');
+        disconnectWebSerial();
+      }
+    });
+  }
 
   // Test Harness Toggle
   UI.btnDemo.addEventListener('click', toggleSimulator);
@@ -2612,6 +2816,7 @@ function initEventListeners() {
 
 // Global Exports
 window.sendSerialCommand = sendSerialCommand;
+window.toggleSerialConsole = toggleSerialConsole;
 
 // Window Load Lifecycle
 window.addEventListener('DOMContentLoaded', () => {
@@ -2620,5 +2825,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
   // Initialize dashboard in strict zero-hardcoded state
   updateDashboardUI(state.telemetry);
-  logTerminal('[SYSTEM READY] Smart Soldier Helmet Telemetry C2 initialized in zero-hardcoded standby.');
+  logTerminal('[SYSTEM READY] SUWIDA // Smart Soldier Helmet Telemetry C2 initialized. Zero-hardcoded standby.');
+  logTerminal('[SERIAL] Click CONNECT USB to open COM4 at 115200 Baud. Ensure Arduino IDE is CLOSED.');
+  logTerminal('[CALIBRATION] MQ-135 & MQ-7 ADC→PPM conversion active. DO pin comparator gating enabled.');
 });

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -46,9 +46,9 @@
         <span class="status-indicator-dot" id="system-status-dot"></span>
         <span class="status-text" id="system-status-text">HARDWARE STANDBY — CONNECT USB</span>
       </div>
-      <div class="gps-status-pill" title="NEO-6M Satellite Navigation Status">
-        <span class="gps-pulse-dot"></span>
-        <span class="gps-text">NEO-6M GPS: ACTIVE FIX</span>
+      <div class="gps-status-pill standby" id="gps-status-pill" title="NEO-6M Satellite Navigation Status">
+        <span class="gps-pulse-dot" id="gps-status-dot"></span>
+        <span class="gps-text" id="gps-header-text">GPS: STANDBY</span>
       </div>
     </div>
 
@@ -121,7 +121,7 @@
   <!-- MAIN INTERACTIVE PLAYGROUND WORKSPACE (3-COLUMN TACTICAL PLAYGROUND) -->
   <main class="playground-stage">
 
-    <!-- LEFT FLANK: LIFE SUPPORT & CBRN (APPLE TACTICAL WIDGETS) -->
+    <!-- LEFT FLANK: CBRN, CO & PROXIMITY (REAL HARDWARE SENSORS) -->
     <aside class="playground-flank left-flank">
 
       <!-- WIDGET 1: MQ-135 TOXIC CHEMICAL & CBRN -->
@@ -140,38 +140,36 @@
             <span class="widget-sub-title">Breathing Zone Inhalation Quality</span>
           </div>
           <div class="widget-headline-val">
-            <span class="metric-compact no-data" id="val-gas">— PPM</span>
+            <span class="metric-compact no-data" id="val-gas">— AO</span>
           </div>
         </div>
 
-        <!-- Dynamic Scenario Status ("Saying what has happened") -->
         <div class="widget-scenario-status" id="scenario-gas">
           Awaiting live USB telemetry packet stream from ESP32.
         </div>
 
-        <!-- Expandable Deep Dive Drawer (Hover or Click) -->
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-gas" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item safe">CLEAN &lt;3000 AO</span>
+          <span class="scale-item warn">ELEV 3000–3500</span>
+          <span class="scale-item danger">DANGER &gt;3500</span>
+        </div>
+
         <div class="widget-depth-drawer">
           <p class="sensor-description">
             SnO₂ metal-oxide semiconductor detecting benzene, alcohol, smoke particulates, ammonia (NH₃), and CO₂ asphyxiation hazards inside soldier breathing envelope.
           </p>
 
-          <div class="threshold-track">
-            <div class="threshold-bar" id="bar-gas" style="width: 0%;"></div>
-          </div>
-          <div class="threshold-scale">
-            <span class="scale-item safe">SAFE &lt;800 PPM</span>
-            <span class="scale-item warn">ELEV 800–1400</span>
-            <span class="scale-item danger">CRIT &gt;1400</span>
-          </div>
-
           <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">DIGITAL COMPARATOR:</span>
+              <span class="proto-val" id="val-mq135-do">DO: —</span>
+            </div>
             <div class="proto-row">
               <span class="proto-lbl">STANDARD:</span>
               <span class="proto-val">MIL-STD-1472H / ASHRAE 62.1</span>
-            </div>
-            <div class="proto-row">
-              <span class="proto-lbl">REMEDIATION:</span>
-              <span class="proto-val">Auto-purge filter canister; verify mask seal; evacuate zone.</span>
             </div>
           </div>
 
@@ -201,7 +199,7 @@
             <span class="widget-sub-title">Combustion &amp; Blast Blowback</span>
           </div>
           <div class="widget-headline-val">
-            <span class="metric-compact no-data" id="val-co">— PPM</span>
+            <span class="metric-compact no-data" id="val-co">— AO</span>
           </div>
         </div>
 
@@ -209,28 +207,28 @@
           Awaiting live USB telemetry packet stream from ESP32.
         </div>
 
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-co" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item safe">SAFE &lt;3000 AO</span>
+          <span class="scale-item warn">ELEV 3000–3500</span>
+          <span class="scale-item danger">LETHAL &gt;3500</span>
+        </div>
+
         <div class="widget-depth-drawer">
           <p class="sensor-description">
             Micro-SnO₂ high-temperature cycling sensor tracking odorless Carbon Monoxide poisoning from artillery blowback, rocket backblast, and vehicle exhaust.
           </p>
 
-          <div class="threshold-track">
-            <div class="threshold-bar" id="bar-co" style="width: 0%;"></div>
-          </div>
-          <div class="threshold-scale">
-            <span class="scale-item safe">SAFE &lt;35 PPM</span>
-            <span class="scale-item warn">ELEV 35–100 PPM</span>
-            <span class="scale-item danger">LETHAL &gt;100 PPM</span>
-          </div>
-
           <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">DIGITAL COMPARATOR:</span>
+              <span class="proto-val" id="val-mq7-do">DO: —</span>
+            </div>
             <div class="proto-row">
               <span class="proto-lbl">STANDARD:</span>
               <span class="proto-val">NIOSH REL: 35 ppm / OSHA PEL: 50 ppm</span>
-            </div>
-            <div class="proto-row">
-              <span class="proto-lbl">REMEDIATION:</span>
-              <span class="proto-val">Oxygen bypass valve open; HUD flash alert; combat egress.</span>
             </div>
           </div>
 
@@ -244,83 +242,20 @@
         </div>
       </div>
 
-      <!-- WIDGET 3: DHT22 VISOR MICRO-CLIMATE & HEAT STRESS -->
-      <div class="apple-widget state-standby" id="card-dht22" onclick="openWidgetInspector('card-dht22')">
-        <div class="widget-top-row">
-          <div class="widget-badge-wrap">
-            <span class="apple-status-dot" id="dot-dht"></span>
-            <span class="sensor-chip">DHT22</span>
-          </div>
-          <span class="badge-status standby" id="pill-dht22">STANDBY</span>
-        </div>
-
-        <div class="widget-title-row">
-          <div class="widget-title-group">
-            <h3 class="widget-main-title">VISOR MICRO-CLIMATE</h3>
-            <span class="widget-sub-title">Thermal Strain &amp; Condensation</span>
-          </div>
-          <div class="widget-headline-val">
-            <span class="metric-compact no-data" id="val-dht-summary">—°C / —%</span>
-          </div>
-        </div>
-
-        <div class="widget-scenario-status" id="scenario-dht">
-          Awaiting live USB telemetry packet stream from ESP32.
-        </div>
-
-        <div class="widget-depth-drawer">
-          <p class="sensor-description">
-            Capacitive humidity sensor &amp; thermistor monitoring heat exhaustion, hypothermia, and dew point fogging on the ballistic optical face shield.
-          </p>
-
-          <div class="dual-metric-split">
-            <div class="split-box">
-              <span class="split-lbl">VISOR TEMP</span>
-              <span class="split-val no-data" id="val-amb-temp">— °C</span>
-              <span class="split-sub">&lt; 32°C NORMAL // &gt; 38°C HEAT STROKE</span>
-            </div>
-            <div class="split-box">
-              <span class="split-lbl">HUMIDITY</span>
-              <span class="split-val no-data" id="val-humidity">— %</span>
-              <span class="split-sub">&gt; 75% CONDENSATION TRIP</span>
-            </div>
-          </div>
-
-          <div class="drawer-protocol-box">
-            <div class="proto-row">
-              <span class="proto-lbl">DEW POINT:</span>
-              <span class="proto-val" id="val-dew-point">— °C [STANDBY]</span>
-            </div>
-            <div class="proto-row">
-              <span class="proto-lbl">STANDARD:</span>
-              <span class="proto-val">US Army TB MED 507</span>
-            </div>
-          </div>
-
-          <div class="widget-footer-actions">
-            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('BLOWER_PULSE')">ANTI-FOG BLOWER PULSE</button>
-          </div>
-        </div>
-
-        <div class="widget-expand-hint">
-          <span class="hint-chevron">▼</span>
-        </div>
-      </div>
-
-      <!-- WIDGET 4: IR OPTICAL FACE SHIELD SEAL -->
+      <!-- WIDGET 3: IR OPTICAL PROXIMITY & VISOR SEAL -->
       <div class="apple-widget state-standby" id="card-ir" onclick="openWidgetInspector('card-ir')">
         <div class="widget-top-row">
           <div class="widget-badge-wrap">
             <span class="apple-status-dot" id="dot-ir"></span>
-            <span class="sensor-chip">IR PROXIMITY</span>
+            <span class="sensor-chip">IR SENSOR</span>
           </div>
           <span class="badge-status standby" id="pill-ir">STANDBY</span>
         </div>
 
         <div class="widget-title-row">
           <div class="widget-title-group">
-            <h3 class="widget-main-title">VISOR SEAL &amp; LATCH</h3>
-            <span class="widget-sub-title">Ballistic Shield Airtight Lock</span>
+            <h3 class="widget-main-title">VISOR PROXIMITY &amp; SEAL</h3>
+            <span class="widget-sub-title">Optical Coronal Defense Latch</span>
           </div>
           <div class="widget-headline-val">
             <span class="metric-compact no-data" id="val-ir">—</span>
@@ -333,8 +268,19 @@
 
         <div class="widget-depth-drawer">
           <p class="sensor-description">
-            940nm infrared reflection detector verifying visor position, face shield airtight lock, and immediate obstacle detection within 15 cm defense cone.
+            940nm active infrared phototransistor monitoring front face shield airtight seal latch and close-quarters obstacle proximity.
           </p>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">DETECTION CONE:</span>
+              <span class="proto-val">940nm Infrared (15 cm range)</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">STATUS:</span>
+              <span class="proto-val" id="val-ir-detail">Awaiting Signal</span>
+            </div>
+          </div>
         </div>
 
         <div class="widget-expand-hint">
@@ -354,7 +300,10 @@
             <span class="hud-badge-tag">AIRCRAFT HUD</span>
             <h4 class="hud-widget-heading">MPU-6050 ATTITUDE LEVEL INDICATOR</h4>
           </div>
-          <div class="hud-status-badge" id="hud-stability-text">STABLE LEVEL // 0.0°</div>
+          <div class="hud-header-actions">
+            <button id="btn-tare-hud-top" class="btn-hud-tare" title="Zero current physical helmet tilt as 0.0° level">⌖ ZERO HORIZON</button>
+            <div class="hud-status-badge" id="hud-stability-text">STABLE LEVEL // 0.0°</div>
+          </div>
         </div>
 
         <div class="hud-instrument-body">
@@ -455,6 +404,9 @@
           <button id="btn-zoom-out" class="btn-hud-tool" title="Zoom Out (or use Mouse Scroll Wheel)">
             <span>－</span>
           </button>
+          <button id="btn-tare-hud" class="btn-hud-tool" title="Zero / Tare Physical Helmet Level Horizon">
+            <span>⌖ TARE</span>
+          </button>
           <button id="btn-sync-gyro" class="btn-hud-tool" title="Reset Standard Tactical Perspective">
             <span>⟲</span>
           </button>
@@ -467,10 +419,158 @@
 
     </section>
 
-    <!-- RIGHT FLANK: BALLISTICS, HARDWARE C2 & PHYSIOLOGY (APPLE TACTICAL WIDGETS) -->
+    <!-- RIGHT FLANK: ENVIRONMENTAL & KINEMATICS (100% REAL HARDWARE SENSORS) -->
     <aside class="playground-flank right-flank">
 
-      <!-- WIDGET 5: MPU-6050 BALLISTIC IMPACT & TBI CONCUSSION -->
+      <!-- WIDGET 4: DHT22 RELATIVE HUMIDITY & DEW POINT CONDENSATION -->
+      <div class="apple-widget state-standby" id="card-dht-hum" onclick="openWidgetInspector('card-dht-hum')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-humidity"></span>
+            <span class="sensor-chip">DHT22 HUMIDITY</span>
+          </div>
+          <span class="badge-status standby" id="pill-humidity">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">AMBIENT RELATIVE HUMIDITY</h3>
+            <span class="widget-sub-title">Visor Condensation &amp; Moisture Index</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-humidity">— %</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-hum">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="dual-metric-row">
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">DEW POINT</span>
+            <span class="dual-val no-data" id="val-dew-point">— °C</span>
+          </div>
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">VISOR FOG RISK</span>
+            <span class="dual-val no-data" id="val-fog-risk">—</span>
+          </div>
+        </div>
+
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-humidity" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item safe">DRY &lt;30%</span>
+          <span class="scale-item safe">COMFORT 30–65%</span>
+          <span class="scale-item warn">CONDENSATION &gt;70%</span>
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            Polymer capacitive moisture sensor monitoring breathable relative humidity inside helmet envelope to prevent visor fogging, corneal dehydration, and respiratory dampness.
+          </p>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">RANGE:</span>
+              <span class="proto-val">0.0% – 100.0% RH (±2% Accuracy)</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">MIL-STD-810H Method 507.6 / ASTM E104</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">REMEDIATION:</span>
+              <span class="proto-val">Engage visor anti-fog micro-vents when relative humidity exceeds 75%.</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('VENT_ON')">ACTIVATE ANTI-FOG VENT</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 5: DHT22 AMBIENT ENVIRONMENT TEMPERATURE -->
+      <div class="apple-widget state-standby" id="card-dht-temp" onclick="openWidgetInspector('card-dht-temp')">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-temp"></span>
+            <span class="sensor-chip">DHT22 TEMP</span>
+          </div>
+          <span class="badge-status standby" id="pill-temp">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">ENVIRONMENT TEMPERATURE</h3>
+            <span class="widget-sub-title">Micro-Climate Thermal Envelope</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-amb-temp">— °C</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-temp">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="dual-metric-row">
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">THERMAL ZONE</span>
+            <span class="dual-val no-data" id="val-heat-zone">—</span>
+          </div>
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">US ARMY CAT</span>
+            <span class="dual-val no-data" id="val-heat-cat">—</span>
+          </div>
+        </div>
+
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-temp" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item warn">FREEZE &lt;0°C</span>
+          <span class="scale-item safe">NOMINAL 15–32°C</span>
+          <span class="scale-item danger">HEAT RISK &gt;38°C</span>
+        </div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            High-precision NTC thermistor measuring ambient air temperature within helmet shell to track hyperthermia risk, heat stroke thresholds, and extreme cold exposure.
+          </p>
+
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">RANGE:</span>
+              <span class="proto-val">-40.0°C to +80.0°C (±0.5°C Resolution)</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">US Army TB MED 507 / OSHA Heat Illness Prevention</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">REMEDIATION:</span>
+              <span class="proto-val">Hydration advisory at &gt;32°C; mandatory shaded rest cycle at &gt;38°C.</span>
+            </div>
+          </div>
+
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('REPORT_THERMAL')">REPORT THERMAL STATUS</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- WIDGET 6: MPU-6050 BALLISTIC IMPACT & TBI CONCUSSION -->
       <div class="apple-widget state-standby" id="card-gforce" onclick="openWidgetInspector('card-gforce')">
         <div class="widget-top-row">
           <div class="widget-badge-wrap">
@@ -490,23 +590,31 @@
           </div>
         </div>
 
+        <div class="triaxial-g-box" id="triaxial-g-box">
+          <span class="triax-item"><span class="triax-lbl">AX</span> <span class="triax-val no-data" id="val-ax">—</span></span>
+          <span class="triax-sep">|</span>
+          <span class="triax-item"><span class="triax-lbl">AY</span> <span class="triax-val no-data" id="val-ay">—</span></span>
+          <span class="triax-sep">|</span>
+          <span class="triax-item"><span class="triax-lbl">AZ</span> <span class="triax-val no-data" id="val-az">—</span></span>
+        </div>
+
         <div class="widget-scenario-status" id="scenario-gforce">
           Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-gforce" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item safe">ROUTINE &lt;2.5G</span>
+          <span class="scale-item warn">SHOCK 2.5–4.5G</span>
+          <span class="scale-item danger">TBI RISK &gt;4.5G</span>
         </div>
 
         <div class="widget-depth-drawer">
           <p class="sensor-description">
             MEMS triaxial accelerometer capturing kinetic impacts, ballistic shell deflections, and blast overpressure to diagnose Traumatic Brain Injury (TBI).
           </p>
-
-          <div class="threshold-track">
-            <div class="threshold-bar" id="bar-gforce" style="width: 0%;"></div>
-          </div>
-          <div class="threshold-scale">
-            <span class="scale-item safe">ROUTINE &lt;2.5G</span>
-            <span class="scale-item warn">SHOCK 2.5–4.5G</span>
-            <span class="scale-item danger">TBI RISK &gt;4.5G</span>
-          </div>
 
           <div class="drawer-protocol-box">
             <div class="proto-row">
@@ -529,153 +637,64 @@
         </div>
       </div>
 
-      <!-- WIDGET 6: ONBOARD ESP32 HARDWARE ACTUATORS -->
-      <div class="apple-widget state-standby" id="card-hardware-c2" onclick="openWidgetInspector('card-hardware-c2')">
+
+      <!-- WIDGET 7: NEO-6M GPS GEOLOCATION & TACTICAL GRID -->
+      <div class="apple-widget state-standby" id="card-gps" onclick="openWidgetInspector('card-gps')">
         <div class="widget-top-row">
           <div class="widget-badge-wrap">
-            <span class="apple-status-dot" id="dot-hw"></span>
-            <span class="sensor-chip">ESP32 C2</span>
+            <span class="apple-status-dot" id="dot-gps"></span>
+            <span class="sensor-chip">NEO-6M GPS</span>
           </div>
-          <span class="badge-status ready">BUS READY</span>
+          <span class="badge-status standby" id="gps-widget-badge">STANDBY</span>
         </div>
 
         <div class="widget-title-row">
           <div class="widget-title-group">
-            <h3 class="widget-main-title">HARDWARE ACTUATORS</h3>
-            <span class="widget-sub-title">Onboard Peripherals &amp; Comms</span>
+            <h3 class="widget-main-title">SOLDIER GEOLOCATION</h3>
+            <span class="widget-sub-title">Tactical Grid &amp; Navigation Fix</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-sats">&#8212; SAT</span>
           </div>
         </div>
 
-        <div class="widget-scenario-status" id="scenario-hw">
-          Hardware GPIO bus active. 5.0V power rail stabilized.
+        <div class="triaxial-g-box" id="gps-coord-box">
+          <span class="triax-item"><span class="triax-lbl">LAT</span> <span class="triax-val no-data" id="val-lat">&#8212;</span></span>
+          <span class="triax-sep">|</span>
+          <span class="triax-item"><span class="triax-lbl">LNG</span> <span class="triax-val no-data" id="val-lng">&#8212;</span></span>
+          <span class="triax-sep">|</span>
+          <span class="triax-item"><span class="triax-lbl">ALT</span> <span class="triax-val no-data" id="val-alt">&#8212; m</span></span>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-gps">
+          Awaiting live USB telemetry packet stream from ESP32.
+        </div>
+
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-sats" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item warn">POOR &lt;4 SAT</span>
+          <span class="scale-item safe">GOOD 4&#8211;7 SAT</span>
+          <span class="scale-item safe">FIX &gt;7 SAT</span>
         </div>
 
         <div class="widget-depth-drawer">
-          <div class="hardware-status-grid">
-            <div class="hw-cell">
-              <span class="hw-lbl">GPS LOCATION:</span>
-              <span class="hw-val" id="val-gps">ACTIVE RECON</span>
-            </div>
-            <div class="hw-cell">
-              <span class="hw-lbl">OLED HUD:</span>
-              <span class="hw-val" id="val-oled">PAGE 0 [SYS]</span>
-            </div>
-            <div class="hw-cell">
-              <span class="hw-lbl">ACOUSTIC BUZZER:</span>
-              <span class="hw-val" id="val-buzzer">STANDBY</span>
-            </div>
-            <div class="hw-cell">
-              <span class="hw-lbl">POWER RAIL:</span>
-              <span class="hw-val highlight">VBUS 5.0V LINK</span>
-            </div>
-            <div class="hw-cell">
-              <span class="hw-lbl">BATTERY:</span>
-              <span class="hw-val" id="val-battery">— %</span>
-            </div>
-            <div class="hw-cell">
-              <span class="hw-lbl">PROXIMITY (HC-SR04):</span>
-              <span class="hw-val" id="val-dist">— cm</span>
-            </div>
+          <p class="sensor-description">
+            u-blox NEO-6M satellite navigation providing real-time GPS fix &mdash; latitude, longitude, altitude, and satellite lock count. Used for soldier position tracking, Medevac coordinate transmission, and dead-reckoning fallback.
+          </p>
+          <div class="drawer-protocol-box">
+            <div class="proto-row"><span class="proto-lbl">PROTOCOL:</span><span class="proto-val">NMEA 0183 / u-blox UBX &mdash; UART 9600 Bd</span></div>
+            <div class="proto-row"><span class="proto-lbl">REMEDIATION:</span><span class="proto-val">Move to open sky. &gt;4 satellites required for valid 3D fix.</span></div>
           </div>
-
-
-          <div class="actuator-button-row">
-            <button id="btn-sound-buzzer" class="btn-action" onclick="event.stopPropagation()">
-              <span>🔊 TEST BUZZER PING</span>
-            </button>
-            <button id="btn-manual-sos" class="btn-action danger" onclick="event.stopPropagation()">
-              <span>🚨 TRANSMIT DISTRESS SOS</span>
-            </button>
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action safe" id="btn-open-map" onclick="event.stopPropagation(); openGpsInMaps()">OPEN IN MAPS</button>
+            <button class="btn-widget-action" onclick="event.stopPropagation(); sendSerialCommand('GPS_STATUS')">REFRESH FIX</button>
           </div>
         </div>
 
-        <div class="widget-expand-hint">
-          <span class="hint-chevron">▼</span>
-        </div>
+        <div class="widget-expand-hint"><span class="hint-chevron">&#9660;</span></div>
       </div>
-
-      <!-- WIDGET 7: SOLDIER BIOMETRIC VECTOR PROBES -->
-      <div class="apple-widget state-standby" id="card-biometrics" onclick="openWidgetInspector('card-biometrics')">
-        <div class="widget-top-row">
-          <div class="widget-badge-wrap">
-            <span class="apple-status-dot" id="dot-bio"></span>
-            <span class="sensor-chip">PHYSIOLOGY</span>
-          </div>
-          <span class="badge-status standby" id="pill-bio">STANDBY</span>
-        </div>
-
-        <div class="widget-title-row">
-          <div class="widget-title-group">
-            <h3 class="widget-main-title">BIOMETRIC VECTORS</h3>
-            <span class="widget-sub-title">Cardiovascular &amp; Core Vitals</span>
-          </div>
-        </div>
-
-        <div class="widget-scenario-status" id="scenario-bio">
-          Awaiting soldier pulse oximetry contact harness connection.
-        </div>
-
-        <div class="widget-depth-drawer">
-          <div class="bio-table">
-            <div class="bio-row">
-              <span class="bio-name">PULSE RATE (MAX30100):</span>
-              <span class="bio-num no-data" id="val-bpm">— BPM</span>
-            </div>
-            <div class="bio-row">
-              <span class="bio-name">OXYGEN SATURATION (SpO2):</span>
-              <span class="bio-num no-data" id="val-spo2">— %</span>
-            </div>
-            <div class="bio-row">
-              <span class="bio-name">CORE TEMP (DS18B20):</span>
-              <span class="bio-num no-data" id="val-temp">— °C</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="widget-expand-hint">
-          <span class="hint-chevron">▼</span>
-        </div>
-      </div>
-
-      <!-- WIDGET 8: REAL-TIME SERIAL TELEMETRY TERMINAL -->
-      <div class="apple-widget state-standby" id="card-terminal" onclick="openWidgetInspector('card-terminal')">
-        <div class="widget-top-row">
-          <div class="widget-badge-wrap">
-            <span class="apple-status-dot active"></span>
-            <span class="sensor-chip">SERIAL BUS</span>
-          </div>
-          <span class="packet-counter" id="packet-counter">0 PKTS</span>
-        </div>
-
-        <div class="widget-title-row">
-          <div class="widget-title-group">
-            <h3 class="widget-main-title">HARDWARE STREAM</h3>
-            <span class="widget-sub-title">115200 Baud Direct USB Ingestion</span>
-          </div>
-        </div>
-
-        <div class="widget-scenario-status" id="scenario-term">
-          Direct hardware UART ingestion stream via Web Serial API.
-        </div>
-
-        <div class="widget-depth-drawer">
-          <div class="terminal-box">
-            <div class="terminal-bar">
-              <span class="terminal-hint">115200 BAUD // LIVE INGESTION</span>
-              <button id="btn-clear-term" class="btn-mini" onclick="event.stopPropagation()">CLEAR</button>
-            </div>
-            <div class="terminal-display" id="terminal-body">
-              <div class="t-line dim">[INIT] Tactical telemetry engine initialized.</div>
-              <div class="t-line dim">[USB] Awaiting hardware link at 115200 baud... Zero hardcoded data active.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="widget-expand-hint">
-          <span class="hint-chevron">▼</span>
-        </div>
-      </div>
-
     </aside>
 
   </main>

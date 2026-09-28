@@ -2313,3 +2313,144 @@ body.light-theme .drawer-tx-input {
   border-color: rgba(0, 0, 0, 0.2);
 }
 
+/* ==========================================================================
+   ENHANCED SENSOR AUDIT & TELEMETRY COMPONENTS
+   ========================================================================== */
+
+/* Triaxial G-Force vector display */
+.triaxial-g-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-subblock);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.triax-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.triax-lbl {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.triax-val {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.triax-sep {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+/* Tri-metric quick vitals row */
+.tri-metric-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.tri-metric-cell {
+  background: var(--bg-subblock);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.tri-lbl {
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.tri-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.tri-val.no-data {
+  color: var(--text-dim);
+}
+
+/* Dual-metric quick sub-readout row */
+.dual-metric-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.dual-metric-cell {
+  background: var(--bg-subblock);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.dual-lbl {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.dual-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dual-val.no-data {
+  color: var(--text-dim);
+}
+
+/* Tare button on HUD level indicator & toolbar */
+.hud-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-hud-tare {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--accent-cyan);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-hud-tare:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+

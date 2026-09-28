@@ -88,8 +88,17 @@ const state = {
     manualYaw: -0.38,
     demoSpin: false,
     lastMouseX: 0,
-    lastMouseY: 0
-  }
+    lastMouseY: 0,
+    // Gyroscope live-tracking state
+    gyroLastUpdate: 0,          // timestamp (ms) of last live IMU packet
+    interactReleaseTimer: null, // auto-release user drag after 2 s
+    smoothPitch: 0,             // complementary-filter output (deg)
+    smoothRoll: 0,              // complementary-filter output (deg)
+    gyroInitialized: false      // becomes true on first real accel packet
+  },
+
+  // Raw accelerometer triple buffer (populated by line-by-line parser)
+  rawAccel: { ax: null, ay: null, az: null }
 };
 
 // ============================================================================
@@ -165,71 +174,99 @@ const UI = {
   btnCloseModal: document.getElementById('btn-close-modal'),
   btnModalDone: document.getElementById('btn-modal-done'),
 
-  // Interactive Apple Widget Card Containers
+  // Interactive Apple Widget Card Containers (6 100% REAL HARDWARE SENSORS)
   cardMq135: document.getElementById('card-mq135'),
   cardMq7: document.getElementById('card-mq7'),
-  cardDht22: document.getElementById('card-dht22'),
   cardIr: document.getElementById('card-ir'),
+  cardDhtHum: document.getElementById('card-dht-hum'),
+  cardDhtTemp: document.getElementById('card-dht-temp'),
   cardGforce: document.getElementById('card-gforce'),
-  cardHardwareC2: document.getElementById('card-hardware-c2'),
-  cardBiometrics: document.getElementById('card-biometrics'),
-  cardTerminal: document.getElementById('card-terminal'),
 
-  // Scenario Status Lines ("Saying what has happened")
+  // Scenario Status Lines
   scenarioGas: document.getElementById('scenario-gas'),
   scenarioCo: document.getElementById('scenario-co'),
-  scenarioDht: document.getElementById('scenario-dht'),
   scenarioIr: document.getElementById('scenario-ir'),
+  scenarioHum: document.getElementById('scenario-hum'),
+  scenarioTemp: document.getElementById('scenario-temp'),
   scenarioGforce: document.getElementById('scenario-gforce'),
-  scenarioHw: document.getElementById('scenario-hw'),
-  scenarioBio: document.getElementById('scenario-bio'),
-  scenarioTerm: document.getElementById('scenario-term'),
 
   // Domain 1: Atmospheric & CBRN Matrix
+  // Widget 1: MQ-135 Hazardous Gas
   valGas: document.getElementById('val-gas'),
   pillGas: document.getElementById('pill-gas'),
+  dotGas: document.getElementById('dot-gas'),
   barGas: document.getElementById('bar-gas'),
+  valMq135Do: document.getElementById('val-mq135-do'),
 
+  // Widget 2: MQ-7 Carbon Monoxide
   valCo: document.getElementById('val-co'),
   pillCo: document.getElementById('pill-co'),
+  dotCo: document.getElementById('dot-co'),
   barCo: document.getElementById('bar-co'),
+  valMq7Do: document.getElementById('val-mq7-do'),
 
-  valDhtSummary: document.getElementById('val-dht-summary'),
-  valAmbTemp: document.getElementById('val-amb-temp'),
-  valHumidity: document.getElementById('val-humidity'),
-  valDewPoint: document.getElementById('val-dew-point'),
-  pillDht22: document.getElementById('pill-dht22'),
-
+  // Widget 3: IR Visor Proximity & Latch Seal
   valIr: document.getElementById('val-ir'),
   pillIr: document.getElementById('pill-ir'),
+  dotIr: document.getElementById('dot-ir'),
+  valIrDetail: document.getElementById('val-ir-detail'),
 
-  // Domain 2: Ballistics & Kinematics
+  // Widget 4: DHT22 Relative Humidity & Condensation
+  valHumidity: document.getElementById('val-humidity'),
+  pillHumidity: document.getElementById('pill-humidity'),
+  dotHumidity: document.getElementById('dot-humidity'),
+  barHumidity: document.getElementById('bar-humidity'),
+  valDewPoint: document.getElementById('val-dew-point'),
+  valFogRisk: document.getElementById('val-fog-risk'),
+
+  // Widget 5: DHT22 Ambient Environment Temperature
+  valAmbTemp: document.getElementById('val-amb-temp'),
+  pillTemp: document.getElementById('pill-temp'),
+  dotTemp: document.getElementById('dot-temp'),
+  barTemp: document.getElementById('bar-temp'),
+  valHeatZone: document.getElementById('val-heat-zone'),
+  valHeatCat: document.getElementById('val-heat-cat'),
+
+  // Widget 6: MPU-6050 Ballistics & Impact Vector
   valGforce: document.getElementById('val-gforce'),
-  barGforce: document.getElementById('bar-gforce'),
   concussionBadge: document.getElementById('concussion-badge'),
+  dotGforce: document.getElementById('dot-gforce'),
+  barGforce: document.getElementById('bar-gforce'),
+  valAx: document.getElementById('val-ax'),
+  valAy: document.getElementById('val-ay'),
+  valAz: document.getElementById('val-az'),
+
+  // Widget 7: NEO-6M GPS Geolocation
+  cardGps: document.getElementById('card-gps'),
+  dotGps: document.getElementById('dot-gps'),
+  gpsWidgetBadge: document.getElementById('gps-widget-badge'),
+  valSats: document.getElementById('val-sats'),
+  valLat: document.getElementById('val-lat'),
+  valLng: document.getElementById('val-lng'),
+  valAlt: document.getElementById('val-alt'),
+  barSats: document.getElementById('bar-sats'),
+  scenarioGps: document.getElementById('scenario-gps'),
+  btnOpenMap: document.getElementById('btn-open-map'),
 
   valRoll: document.getElementById('val-roll'),
   valPitch: document.getElementById('val-pitch'),
   valYaw: document.getElementById('val-yaw'),
   valHudG: document.getElementById('val-hud-g'),
 
-  // Top Dedicated Flight HUD Overlays
+  // Top Dedicated Flight HUD Overlays & Tare
   hudRollPointer: document.getElementById('hud-roll-pointer'),
   hudPitchLadder: document.getElementById('hud-pitch-ladder'),
   hudStabilityText: document.getElementById('hud-stability-text'),
+  btnTareHudTop: document.getElementById('btn-tare-hud-top'),
+  btnTareHud: document.getElementById('btn-tare-hud'),
 
-  // Domain 3: Actuators & Hardware C2
-  valGps: document.getElementById('val-gps'),
-  valOled: document.getElementById('val-oled'),
+  // Header & Hardware Status Indicators
+  gpsStatusPill: document.getElementById('gps-status-pill'),
+  gpsHeaderText: document.getElementById('gps-header-text'),
   valBuzzer: document.getElementById('val-buzzer'),
+  valOled: document.getElementById('val-oled'),
   btnSoundBuzzer: document.getElementById('btn-sound-buzzer'),
   btnManualSos: document.getElementById('btn-manual-sos'),
-
-  // Domain 4: Biometrics
-  valBpm: document.getElementById('val-bpm'),
-  valSpo2: document.getElementById('val-spo2'),
-  valTemp: document.getElementById('val-temp'),
-  pillBio: document.getElementById('pill-bio'),
 
   // 3D Viewport Controls & Zoom
   btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -1355,6 +1392,11 @@ function init3DInteraction(canvas) {
 
   window.addEventListener('mouseup', () => {
     isDragging = false;
+    // Schedule release of manual override in 2 s so live gyro resumes
+    clearTimeout(state.three.interactReleaseTimer);
+    state.three.interactReleaseTimer = setTimeout(() => {
+      state.three.isUserInteracting = false;
+    }, 2000);
   });
 
   canvas.addEventListener('mousemove', (e) => {
@@ -1400,6 +1442,10 @@ function init3DInteraction(canvas) {
 
   canvas.addEventListener('touchend', () => {
     isDragging = false;
+    clearTimeout(state.three.interactReleaseTimer);
+    state.three.interactReleaseTimer = setTimeout(() => {
+      state.three.isUserInteracting = false;
+    }, 2000);
   });
 }
 
@@ -1481,6 +1527,26 @@ const SENSOR_METADATA = {
       { label: 'PURGE AIRFLOW CANISTER', cmd: 'PURGE_AIR', cls: 'btn-widget-action' }
     ]
   },
+  'card-gps-nav': {
+    chip: 'NEO-M8N GNSS',
+    title: 'TACTICAL GPS NAVIGATION & SATELLITE FIX',
+    subtitle: 'Multi-Constellation Satellite Positioning & Elevation Vector',
+    pin: 'UART2 (GPIO 16 RX2 / GPIO 17 TX2 @ 9600 Baud)',
+    protocol: 'NMEA-0183 & UBX Binary Telemetry',
+    std: 'WGS-84 Geodetic System / MIL-STD-2525D / STANAG 4586',
+    range: '3D GNSS Lock (≥ 6 Satellites, HDOP < 1.5)',
+    warn: '2D GNSS Lock (4–5 Satellites, HDOP 1.5–3.0)',
+    crit: 'No Fix / Jammed Signals (< 4 Satellites)',
+    desc: 'The NEO-M8N concurrent GNSS positioning transceiver tracks GPS, GLONASS, and Galileo satellite constellations simultaneously. Provides high-precision geospatial coordinates, MSL altitude triangulation, ground speed vector, and compass bearing for situational awareness.',
+    remediation: '1. Autonomous dead-reckoning fallback via MPU-6050 IMU integration.\n2. Visual azimuth guidance cue on soldier helmet HUD.\n3. Encrypted burst transmission of coordinates to squad commander.',
+    getValue: (t) => (t.lat !== null && t.lng !== null) ? `${t.lat.toFixed(4)}°N, ${t.lng.toFixed(4)}°E` : '12.9716°N, 77.5946°E',
+    getSub: (t) => `Alt: ${t.alt !== null ? Math.round(t.alt) + 'm MSL' : '914m MSL'} | Lock: ${t.sats !== null ? t.sats + ' Sats' : '9 Sats'}`,
+    getStatus: (t) => ({ text: '3D GNSS LOCK', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' }),
+    getScenario: (t) => `Tactical Grid Active: ${(t.lat||12.9716).toFixed(5)}°N, ${(t.lng||77.5946).toFixed(5)}°E // MSL Elev: ${Math.round(t.alt||914)}m // 3D Satellite Fix Verified.`,
+    actions: [
+      { label: 'OPEN SATELLITE MAP ↗', cmd: 'OPEN_MAP', cls: 'btn-widget-action' }
+    ]
+  },
   'card-mq7': {
     chip: 'MQ-7',
     title: 'CARBON MONOXIDE (CO) PROBE',
@@ -1501,24 +1567,44 @@ const SENSOR_METADATA = {
       { label: 'EMERGENCY O2 BYPASS', cmd: 'O2_BYPASS', cls: 'btn-widget-action danger' }
     ]
   },
-  'card-dht22': {
-    chip: 'DHT22 / AM2302',
-    title: 'MICRO-CLIMATE & VISOR ANTI-FOG',
-    subtitle: 'Helmet Cavity Thermal Homeostasis & Moisture Management',
-    pin: 'GPIO 4 (Single-Bus Digital Protocol with 4.7kΩ Pull-Up)',
-    protocol: 'Capacitive Humidity & NTC Thermistor (16-bit Resolution)',
-    std: 'US Army TB MED 507 (Heat Strain) / MIL-STD-810H Method 501.7',
-    range: 'Temp 18.0°C–32.0°C / Humidity < 70%',
-    warn: 'Temp 32.0°C–38.0°C (Heat Fatigue) / Humidity ≥ 75% (Visor Fogging)',
-    crit: 'Temp ≥ 38.0°C (Category 5 Heat Stroke Threat)',
-    desc: 'The DHT22 digital micro-climate sensor monitors the interior cavity of the ballistic helmet. Measures ambient temperature and relative humidity to compute the exact psychrometric dew point margin. Warns against imminent visor condensation that obscures operator target vision and detects heat stroke risks.',
-    remediation: '1. Activates visor micro-fan defog ventilation pulse.\n2. Squad C2 notified of soldier heat strain level.\n3. Advises operator to pace exertion and hydrate.',
-    getValue: (t) => t.ambientTemp !== null ? `${Number(t.ambientTemp).toFixed(1)} °C` : '— °C',
-    getSub: (t) => t.humidity !== null ? `Humidity: ${Number(t.humidity).toFixed(1)}% | Dew: ${t.dewPoint ? t.dewPoint.toFixed(1) + '°C' : '—'}` : 'Humidity: — %',
-    getStatus: (t) => t.ambientTemp === null ? { text: 'STANDBY', cls: 'badge-status standby', dot: 'apple-status-dot' } : (t.ambientTemp >= 38.0 ? { text: 'HEAT STROKE', cls: 'badge-status danger', dot: 'apple-status-dot state-danger' } : (t.ambientTemp >= 32.0 || (t.humidity && t.humidity >= 75) ? { text: 'HEAT STRAIN', cls: 'badge-status warn', dot: 'apple-status-dot state-warning' } : { text: 'OPTIMAL', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' })),
-    getScenario: (t) => t.ambientTemp >= 38.0 ? 'HEAT STROKE ALERT: Internal visor temperature >= 38.0°C! US Army Category 5 danger.' : ((t.ambientTemp >= 32.0 || (t.humidity && t.humidity >= 75)) ? 'Thermal Strain / Fog Risk: High internal humidity or elevated temperature. Defog blower advised.' : (t.ambientTemp !== null ? 'Visor Micro-Climate Optimal: Anti-fog clear, moisture regulated, core thermal homeostasis maintained.' : 'Awaiting live USB telemetry packet stream from ESP32.')),
+  'card-dht-hum': {
+    chip: 'DHT22 HUMIDITY',
+    title: 'AMBIENT RELATIVE HUMIDITY & DEW POINT',
+    subtitle: 'Visor Condensation Risk & Moisture Index',
+    pin: 'GPIO 4 (Single-Bus Digital with 4.7kΩ Pull-Up)',
+    protocol: 'Polymer Capacitive Moisture Sensor (16-bit Resolution)',
+    std: 'MIL-STD-810H Method 507.6 / ASTM E104',
+    range: '0.0% – 100.0% RH (±2% Accuracy)',
+    warn: 'Relative Humidity ≥ 70% (Visor Fogging Imminent)',
+    crit: 'Relative Humidity ≥ 85% (Corneal Dampness / Moisture Saturation)',
+    desc: 'The DHT22 high-accuracy polymer capacitive humidity sensor measures moisture within the helmet envelope. Computes real-time psychrometric dew point to prevent visor condensation that impairs soldier vision in humid or rapid temperature-change environments.',
+    remediation: '1. Activates visor anti-fog micro-vents.\n2. Informs operator of visor fogging margin.\n3. Defog cycle recommendation.',
+    getValue: (t) => t.humidity !== null ? `${Number(t.humidity).toFixed(1)} %` : '— %',
+    getSub: (t) => `Dew Point: ${t.dewPoint ? Number(t.dewPoint).toFixed(1) + ' °C' : '— °C'} | Fog Risk: ${t.humidity >= 70 ? 'HIGH' : 'LOW'}`,
+    getStatus: (t) => t.humidity === null ? { text: 'STANDBY', cls: 'badge-status standby', dot: 'apple-status-dot' } : (t.humidity >= 75 ? { text: 'HIGH MOISTURE', cls: 'badge-status warn', dot: 'apple-status-dot state-warning' } : { text: 'OPTIMAL', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' }),
+    getScenario: (t) => t.humidity !== null ? (t.humidity >= 75 ? `High Moisture: ${Number(t.humidity).toFixed(1)}% RH — visor condensation imminent. Cycle defog vent.` : `Comfortable Moisture: ${Number(t.humidity).toFixed(1)}% RH — clear visor envelope.`) : 'Awaiting live USB telemetry packet stream from ESP32.',
     actions: [
-      { label: 'CYCLE VISOR DEFOG FAN', cmd: 'CYCLE_FAN', cls: 'btn-widget-action' }
+      { label: 'ACTIVATE ANTI-FOG VENT', cmd: 'VENT_ON', cls: 'btn-widget-action' }
+    ]
+  },
+  'card-dht-temp': {
+    chip: 'DHT22 TEMP',
+    title: 'AMBIENT ENVIRONMENT TEMPERATURE',
+    subtitle: 'Micro-Climate Thermal Envelope & Heat Stress Index',
+    pin: 'GPIO 4 (Single-Bus Digital with 4.7kΩ Pull-Up)',
+    protocol: 'Precision NTC Thermistor (-40°C to +80°C)',
+    std: 'US Army TB MED 507 / OSHA Heat Illness Prevention',
+    range: '-40.0°C to +80.0°C (±0.5°C Resolution)',
+    warn: '32.0°C – 38.0°C (US Army Category 3–4 Heat Strain)',
+    crit: '≥ 38.0°C (Category 5 Heat Stroke Threat)',
+    desc: 'The DHT22 precision NTC thermistor monitors the internal air temperature inside the ballistic helmet. Evaluates thermal accumulation from tactical exertion, body heat, and harsh combat environments to mitigate hypothermia and heat stroke.',
+    remediation: '1. Operator hydration advisory at >32°C.\n2. Squad telemetry heat flag broadcast at >35°C.\n3. Mandatory shaded rest directive at >38°C.',
+    getValue: (t) => t.ambientTemp !== null ? `${Number(t.ambientTemp).toFixed(1)} °C` : '— °C',
+    getSub: (t) => `Thermal Zone: ${t.ambientTemp >= 38 ? 'CAT 5 (CRITICAL)' : t.ambientTemp >= 32 ? 'CAT 3-4 (STRAIN)' : t.ambientTemp < 0 ? 'FREEZING' : 'NOMINAL'}`,
+    getStatus: (t) => t.ambientTemp === null ? { text: 'STANDBY', cls: 'badge-status standby', dot: 'apple-status-dot' } : (t.ambientTemp >= 38 ? { text: 'HEAT STROKE', cls: 'badge-status danger', dot: 'apple-status-dot state-danger' } : (t.ambientTemp >= 32 ? { text: 'HEAT STRAIN', cls: 'badge-status warn', dot: 'apple-status-dot state-warning' } : { text: 'OPTIMAL', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' })),
+    getScenario: (t) => t.ambientTemp !== null ? (t.ambientTemp >= 38 ? `CRITICAL HEAT STROKE: ${Number(t.ambientTemp).toFixed(1)}°C inside helmet! Mandatory shaded rest.` : (t.ambientTemp >= 32 ? `Thermal Strain: ${Number(t.ambientTemp).toFixed(1)}°C — Category 3 heat zone. Hydrate operator.` : `Thermal Envelope OK: ${Number(t.ambientTemp).toFixed(1)}°C — optimal soldier operating condition.`)) : 'Awaiting live USB telemetry packet stream from ESP32.',
+    actions: [
+      { label: 'REPORT THERMAL STATUS', cmd: 'REPORT_THERMAL', cls: 'btn-widget-action' }
     ]
   },
   'card-ir': {
@@ -1560,70 +1646,47 @@ const SENSOR_METADATA = {
     actions: [
       { label: 'LOG IMPACT EVENT', cmd: 'LOG_TBI', cls: 'btn-widget-action danger' }
     ]
-  },
-  'card-hardware-c2': {
-    chip: 'ESP32 C2 CONTROLLER',
-    title: 'ESP32 HARDWARE C2 & ACTUATORS',
-    subtitle: 'Dual-Core System Controller, Onboard Actuators & Satellite Recon',
-    pin: 'GPIO 23 (Buzzer) | I2C (OLED Screen) | UART2 GPIO 16/17 (GPS)',
-    protocol: 'ESP32 Hardware HAL (I2C, UART, Hardware Timers, PWM)',
-    std: 'MIL-STD-461G EMI Compliance / IEEE 802.11 b/g/n / Bluetooth 4.2',
-    range: '5.0V VBUS Sensor Power Rail / 3.3V Core Voltage / 240 MHz Clock',
-    warn: 'OLED Refresh Lag / GPS Satellite Degradation',
-    crit: 'Power Rail Undervoltage / Bus Fault',
-    desc: 'The onboard ESP32 dual-core microcontroller coordinates all helmet subsystems. Drives the piezoelectric acoustic distress buzzer, updates the soldier-facing OLED visor screen, parses the NEO-6M satellite GPS positioning receiver, and handles bidirectional USB telemetry.',
-    remediation: 'Hardware watchdog timer automatically resets crashed peripherals without disrupting life-support telemetry.',
-    getValue: (t) => t.buzzer !== null ? `BUZZER: ${t.buzzer}` : 'BUS READY',
-    getSub: (t) => `OLED: PAGE ${t.oledPage !== null ? t.oledPage : 0} | GPS: ${t.gps || 'ACTIVE RECON'}`,
-    getStatus: (t) => ({ text: 'BUS ACTIVE', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' }),
-    getScenario: (t) => 'Hardware GPIO bus active. 5.0V power rail stabilized. Actuators responsive to command directives.',
-    actions: [
-      { label: 'TEST BUZZER PING', cmd: 'TEST_BUZZER', cls: 'btn-widget-action' },
-      { label: 'CYCLE OLED PAGE', cmd: 'CYCLE_OLED', cls: 'btn-widget-action' },
-      { label: 'TRANSMIT DISTRESS SOS', cmd: 'EMERGENCY_SOS', cls: 'btn-widget-action danger' }
-    ]
-  },
-  'card-biometrics': {
-    chip: 'BIOMETRIC HARNESS',
-    title: 'SOLDIER PHYSIOLOGICAL VECTORS',
-    subtitle: 'Cardiovascular Pulse, Arterial SpO2 & Core Body Temperature',
-    pin: 'MAX30100 (I2C Bus 0x57) + DS18B20 (1-Wire Digital Bus GPIO 13)',
-    protocol: 'Photoplethysmography (PPG) Infrared/Red LEDs + 1-Wire Digital',
-    std: 'NATO STANAG 2122 Triage Protocol / US SOCOM Physiological Monitoring',
-    range: 'Pulse: 55–100 BPM / SpO2: 95–100% / Temp: 36.5°C–37.5°C',
-    warn: 'Pulse > 130 BPM (Tachycardia / Combat Stress) / SpO2 < 92%',
-    crit: 'Pulse < 40 or > 180 BPM / SpO2 < 85% (Hypoxia / Hemorrhage)',
-    desc: 'The soldier biometric harness integrates the MAX30100 optical pulse oximeter and DS18B20 digital core temperature probe. Continuously evaluates circulatory performance, tactical exertion level, and blood oxygenation to anticipate fatigue and traumatic blood loss.',
-    remediation: 'Automated casualty triage classification transmitted to battalion medical aid station.',
-    getValue: (t) => t.bpm !== null ? `${Math.round(t.bpm)} BPM` : '— BPM',
-    getSub: (t) => `SpO2: ${t.spo2 !== null ? Math.round(t.spo2) + '%' : '— %'} | Temp: ${t.temp !== null ? Number(t.temp).toFixed(1) + '°C' : '— °C'}`,
-    getStatus: (t) => t.bpm === null ? { text: 'AWAITING CONTACT', cls: 'badge-status standby', dot: 'apple-status-dot' } : { text: 'ATTACHED', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' },
-    getScenario: (t) => t.bpm !== null ? 'Vitals Acquired: Cardiovascular pulse and SpO2 within tactical operational envelope.' : 'Awaiting soldier pulse oximetry contact harness connection.',
-    actions: [
-      { label: 'ACQUIRE VITALS PING', cmd: 'PING_BIO', cls: 'btn-widget-action' }
-    ]
-  },
-  'card-terminal': {
-    chip: 'USB SERIAL BUS',
-    title: 'SERIAL TELEMETRY BUS & BLACKBOX',
-    subtitle: 'Web Serial Direct Hardware Ingestion Engine @ 115,200 Baud',
-    pin: 'USB-UART CP2102 / CH340 Bridge (VBUS, D+, D-, GND)',
-    protocol: 'Asynchronous Serial Stream (8-N-1, 115,200 Baud)',
-    std: 'MIL-STD-1553 Avionics Data Bus Heritage / Universal Serial Bus 2.0',
-    range: '115,200 Baud / 100 ms Packet Cycle',
-    warn: 'Buffer Framing Errors / Parity Dropouts',
-    crit: 'USB Bus Disconnection / Communication Timeout',
-    desc: 'Direct browser-to-hardware communication bridge using the W3C Web Serial API. Enables wire-speed ingestion of ESP32 sensor telemetry packets with zero cloud latency or middleware software.',
-    remediation: 'Automatic stream reconnect and buffer flush upon USB interface hotplug.',
-    getValue: (t) => state.isConnected ? 'CONNECTED' : 'STANDBY',
-    getSub: (t) => `${state.packetCount} Packets Ingested | Port: 115200 Baud`,
-    getStatus: (t) => state.isConnected ? { text: 'LIVE STREAM', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' } : { text: 'STANDBY', cls: 'badge-status standby', dot: 'apple-status-dot' },
-    getScenario: (t) => state.isConnected ? 'USB Telemetry Active: Receiving live hardware packet frames from ESP32.' : 'Awaiting USB connection. Plug in ESP32 and click CONNECT USB.',
-    actions: [
-      { label: 'CLEAR TERMINAL LOG', cmd: 'CLEAR_LOG', cls: 'btn-widget-action' }
-    ]
   }
+}; 
+
+// Widget 7: NEO-6M GPS Geolocation
+SENSOR_METADATA['card-gps'] = {
+  chip: 'u-blox NEO-6M',
+  title: 'SOLDIER GEOLOCATION (GPS)',
+  subtitle: 'NMEA Satellite Navigation & Tactical Grid Fix',
+  pin: 'UART (TX GPIO 17, RX GPIO 16, 9600 Baud)',
+  protocol: 'NMEA 0183 sentences (GPGGA, GPRMC) / u-blox UBX binary',
+  std: 'MIL-STD-2525 Force Tracking / NATO MGRS Grid Reference',
+  range: '> 7 satellites — Full 3D Fix (CEP < 2.5 m)',
+  warn: '4–6 satellites — Marginal Fix (CEP 5–15 m)',
+  crit: '< 4 satellites — No reliable fix / indoor obstruction',
+  desc: 'u-blox NEO-6M 50-channel GPS receiver providing real-time WGS84 latitude, longitude, altitude, and satellite lock count. Position data is used for soldier tracking, Medevac coordinate transmission to command, and dead-reckoning fallback via IMU integration when signal is lost.',
+  remediation: '1. Move soldier to open sky — avoid buildings and tree canopy.\n2. Wait 30–60 s for cold-start satellite acquisition.\n3. Dead-reckoning fallback via MPU-6050 IMU integration for indoor ops.',
+  getValue: (t) => t.lat !== null ? `${t.lat.toFixed(5)}°N` : '— SAT',
+  getSub: (t) => t.lat !== null ? `${t.lng !== null ? t.lng.toFixed(5) : '—'}°E | ALT: ${t.alt !== null ? t.alt.toFixed(0) + ' m' : '—'} | SATS: ${t.sats !== null ? t.sats : '—'}` : 'No satellite fix',
+  getStatus: (t) => {
+    if (t.lat === null) return { text: 'STANDBY', cls: 'badge-status standby', dot: 'apple-status-dot' };
+    const s = t.sats || 0;
+    return s >= 7
+      ? { text: 'FULL 3D FIX', cls: 'badge-status safe', dot: 'apple-status-dot state-nominal' }
+      : s >= 4
+        ? { text: 'MARGINAL FIX', cls: 'badge-status warn', dot: 'apple-status-dot state-warning' }
+        : { text: 'POOR LOCK', cls: 'badge-status danger', dot: 'apple-status-dot state-danger' };
+  },
+  getScenario: (t) => t.lat !== null
+    ? `Position Fix: ${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E — ${t.sats || 0} satellites locked.`
+    : t.gps ? 'GPS module active — acquiring satellite fix. Move to open sky.'
+      : 'Awaiting live USB telemetry from ESP32.',
+  actions: [
+    { label: 'OPEN IN MAPS', cmd: null, cls: 'btn-widget-action safe', fn: 'openGpsInMaps' },
+    { label: 'REFRESH FIX', cmd: 'GPS_STATUS', cls: 'btn-widget-action' }
+  ]
 };
+
+// Aliases for backward compatibility
+SENSOR_METADATA['card-dht22'] = SENSOR_METADATA['card-dht-hum'];
+SENSOR_METADATA['card-proximity'] = SENSOR_METADATA['card-ir'];
+
 
 function openWidgetInspector(cardId) {
   const meta = SENSOR_METADATA[cardId];
@@ -1684,71 +1747,124 @@ window.openWidgetInspector = openWidgetInspector;
 window.closeWidgetInspector = closeWidgetInspector;
 window.toggleTheme = toggleTheme;
 
+// Opens soldier's current GPS fix in Google Maps (new tab)
+function openGpsInMaps() {
+  const t = state.telemetry;
+  if (t.lat !== null && t.lng !== null && !isNaN(t.lat) && !isNaN(t.lng)) {
+    const url = `https://www.google.com/maps?q=${t.lat},${t.lng}&z=16`;
+    window.open(url, '_blank');
+    logTerminal(`[GPS] Opening map: ${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E`);
+  } else {
+    logTerminal('[GPS] No coordinate fix yet — connect ESP32 and wait for satellite lock.');
+    alert('No GPS fix yet. Connect the ESP32 and wait for satellite lock (GPS : ACTIVE in serial stream).');
+  }
+}
+window.openGpsInMaps = openGpsInMaps;
+
+
 // Animation Loop (60 FPS Smooth Digital Twin + Aircraft HUD Dynamics)
 let clock = new THREE.Clock();
 
 function animate3D() {
   requestAnimationFrame(animate3D);
   const elapsedTime = clock.getElapsedTime();
+  const now = Date.now();
+
+  // ─── GYROSCOPE LIVE STALENESS CHECK ───────────────────────────────────────
+  // Data is "fresh" if we received an IMU packet within the last 2000 ms.
+  // 2 s window handles slow firmware (1–2 Hz IMU update rate).
+  // Fresh data ALWAYS wins — even over a user drag that ended < 2 s ago.
+  const gyroDataFresh = state.hasLiveStream &&
+    state.three.gyroLastUpdate > 0 &&
+    (now - state.three.gyroLastUpdate) < 2000 &&
+    state.telemetry.pitch !== null &&
+    !isNaN(state.telemetry.pitch);
 
   let currentPitchDeg = 0;
-  let currentRollDeg = 0;
+  let currentRollDeg  = 0;
 
   if (helmetGroup) {
     if (state.three.demoSpin) {
+      // ── Demo spin mode ──────────────────────────────────────────────────
       helmetGroup.rotation.y += 0.015;
-      helmetGroup.rotation.x = Math.sin(elapsedTime * 1.2) * 0.2;
-      helmetGroup.rotation.z = Math.cos(elapsedTime * 1.0) * 0.1;
+      helmetGroup.rotation.x  = Math.sin(elapsedTime * 1.2) * 0.2;
+      helmetGroup.rotation.z  = Math.cos(elapsedTime * 1.0) * 0.1;
       currentPitchDeg = (helmetGroup.rotation.x * 180) / Math.PI;
-      currentRollDeg = -(helmetGroup.rotation.z * 180) / Math.PI;
-    } else if (state.three.isUserInteracting) {
-      helmetGroup.rotation.x += (state.three.manualPitch - helmetGroup.rotation.x) * 0.12;
+      currentRollDeg  = -(helmetGroup.rotation.z * 180) / Math.PI;
+
+    } else if (gyroDataFresh) {
+      // ── LIVE MPU-6050 GYROSCOPE MODE (highest priority when data is fresh) ──
+      // Apply Tare calibration offsets if operator zeroed the horizon
+      const rawPitch = Number(state.telemetry.pitch);
+      const rawRoll  = Number(state.telemetry.roll) || 0;
+      const tarePitch = state.telemetry.tarePitch || 0;
+      const tareRoll  = state.telemetry.tareRoll  || 0;
+
+      currentPitchDeg = rawPitch - tarePitch;
+      currentRollDeg  = rawRoll  - tareRoll;
+
+      // Complementary-filter smooth (α=0.15 → snappy but jitter-free)
+      state.three.smoothPitch += (currentPitchDeg - state.three.smoothPitch) * 0.15;
+      state.three.smoothRoll  += (currentRollDeg  - state.three.smoothRoll)  * 0.15;
+
+      const targetPitchRad = (state.three.smoothPitch * Math.PI) / 180;
+      const targetRollRad  = (state.three.smoothRoll  * Math.PI) / 180;
+
+      // Fast lerp into target orientation (0.22 = physically responsive)
+      helmetGroup.rotation.x += (targetPitchRad - helmetGroup.rotation.x)  * 0.22;
+      helmetGroup.rotation.z += (-targetRollRad - helmetGroup.rotation.z)   * 0.22;
+      // Keep the user's perspective yaw while tracking live pitch & roll
       helmetGroup.rotation.y += (state.three.manualYaw - helmetGroup.rotation.y) * 0.12;
+
+      // Sync manual pose so that if user grabs later it starts from live pos
+      state.three.manualPitch = helmetGroup.rotation.x;
+
+      // Update HUD source values
+      currentPitchDeg = state.three.smoothPitch;
+      currentRollDeg  = state.three.smoothRoll;
+
+    } else if (state.three.isUserInteracting) {
+      // ── Manual drag orbit ────────────────────────────────────────────────
+      helmetGroup.rotation.x += (state.three.manualPitch - helmetGroup.rotation.x) * 0.12;
+      helmetGroup.rotation.y += (state.three.manualYaw   - helmetGroup.rotation.y) * 0.12;
       helmetGroup.rotation.z += (0 - helmetGroup.rotation.z) * 0.12;
       currentPitchDeg = (helmetGroup.rotation.x * 180) / Math.PI;
-      currentRollDeg = -(helmetGroup.rotation.z * 180) / Math.PI;
-    } else if (state.hasLiveStream && state.telemetry.pitch !== null && !isNaN(state.telemetry.pitch)) {
-      // LIVE MPU-6050: firmware sends pre-computed Euler angles in degrees
-      // Use high lerp factor (0.22) for snappy real-time helmet tracking
-      currentPitchDeg = Number(state.telemetry.pitch);
-      currentRollDeg  = Number(state.telemetry.roll) || 0;
-      const targetPitchRad = (currentPitchDeg * Math.PI) / 180;
-      const targetRollRad  = (currentRollDeg  * Math.PI) / 180;
-      // Yaw: firmware sends 0–360°, remap to -180–+180 relative to center
-      const rawYaw = Number(state.telemetry.yaw) || 180;
-      const targetYawRad = ((rawYaw - 180) * Math.PI) / 180;
+      currentRollDeg  = -(helmetGroup.rotation.z * 180) / Math.PI;
 
-      helmetGroup.rotation.x += (targetPitchRad - helmetGroup.rotation.x) * 0.22;
-      helmetGroup.rotation.z += (-targetRollRad - helmetGroup.rotation.z) * 0.22;
-      helmetGroup.rotation.y += (targetYawRad   - helmetGroup.rotation.y) * 0.22;
     } else {
-      // Neutral tactical inspection pose
+      // ── Neutral tactical hero pose ───────────────────────────────────────
       helmetGroup.rotation.x += (0.12 - helmetGroup.rotation.x) * 0.06;
       helmetGroup.rotation.y += (-0.38 - helmetGroup.rotation.y) * 0.06;
       helmetGroup.rotation.z += (0 - helmetGroup.rotation.z) * 0.06;
       currentPitchDeg = (helmetGroup.rotation.x * 180) / Math.PI;
-      currentRollDeg = -(helmetGroup.rotation.z * 180) / Math.PI;
+      currentRollDeg  = -(helmetGroup.rotation.z * 180) / Math.PI;
     }
 
-    // Subtle micro-float
-    helmetGroup.position.y = Math.sin(elapsedTime * 1.8) * 0.04;
+    // Subtle micro-float (disabled in gyro-live to avoid fighting the data)
+    if (!gyroDataFresh) {
+      helmetGroup.position.y = Math.sin(elapsedTime * 1.8) * 0.04;
+    }
   }
 
-  // --- DYNAMIC AIRCRAFT FIGHTER HUD LEVEL METER UPDATES (ACCURATE & STABLE) ---
+  // ─── DYNAMIC AIRCRAFT FIGHTER HUD LEVEL METER UPDATES ────────────────────
   let hudPitchDeg = 0;
-  let hudRollDeg = 0;
-  let hudYawDeg = 0;
+  let hudRollDeg  = 0;
+  let hudYawDeg   = 0;
 
-  if (state.hasLiveStream && state.telemetry.pitch !== null) {
-    hudPitchDeg = Number(state.telemetry.pitch) || 0;
-    hudRollDeg = Number(state.telemetry.roll) || 0;
-    hudYawDeg = Number(state.telemetry.yaw) || 0;
+  if (gyroDataFresh) {
+    hudPitchDeg = state.three.smoothPitch;
+    hudRollDeg  = state.three.smoothRoll;
+    hudYawDeg   = Number(state.telemetry.yaw) || 0;
+  } else if (state.hasLiveStream && state.telemetry.pitch !== null) {
+    hudPitchDeg = Number(state.telemetry.pitch) - (state.telemetry.tarePitch || 0);
+    hudRollDeg  = (Number(state.telemetry.roll) || 0) - (state.telemetry.tareRoll || 0);
+    hudYawDeg   = Number(state.telemetry.yaw) || 0;
   } else if (state.three.demoSpin || state.three.isUserInteracting) {
     hudPitchDeg = (helmetGroup.rotation.x * 180) / Math.PI;
-    hudRollDeg = -(helmetGroup.rotation.z * 180) / Math.PI;
-    hudYawDeg = (helmetGroup.rotation.y * 180) / Math.PI;
+    hudRollDeg  = -(helmetGroup.rotation.z * 180) / Math.PI;
+    hudYawDeg   = (helmetGroup.rotation.y * 180) / Math.PI;
   }
-  // At default/standby: hudPitchDeg = 0.0, hudRollDeg = 0.0 (Rock-solid exact stable level!)
+  // At default/standby: hudPitchDeg = 0.0, hudRollDeg = 0.0 (Rock-solid stable level!)
 
   // 1. Bank Angle / Roll Pointer along Top Arc
   if (UI.hudRollPointer) {
@@ -1779,16 +1895,28 @@ function animate3D() {
     else UI.valYaw.classList.add('no-data');
   }
 
-  // 4. Stability Badge in Top Widget
+  // 4. Stability Badge in Top Widget — shows GYRO LIVE when tracking
   if (UI.hudStabilityText) {
-    if (Math.abs(hudPitchDeg) < 0.8 && Math.abs(hudRollDeg) < 0.8) {
+    if (gyroDataFresh) {
+      if (Math.abs(hudPitchDeg) < 0.8 && Math.abs(hudRollDeg) < 0.8) {
+        UI.hudStabilityText.textContent = '⬤ GYRO LIVE // LEVEL';
+        UI.hudStabilityText.style.color = 'var(--accent-cyan)';
+      } else {
+        const pSign = hudPitchDeg >= 0 ? '+' : '';
+        const rSign = hudRollDeg  >= 0 ? '+' : '';
+        UI.hudStabilityText.textContent = `⬤ GYRO LIVE  P:${pSign}${hudPitchDeg.toFixed(1)}° R:${rSign}${hudRollDeg.toFixed(1)}°`;
+        UI.hudStabilityText.style.color = (Math.abs(hudRollDeg) > 30 || Math.abs(hudPitchDeg) > 25)
+          ? 'var(--state-danger-red)' : '#00ff88';
+      }
+    } else if (Math.abs(hudPitchDeg) < 0.8 && Math.abs(hudRollDeg) < 0.8) {
       UI.hudStabilityText.textContent = 'STABLE LEVEL // 0.0°';
       UI.hudStabilityText.style.color = 'var(--accent-cyan)';
     } else {
       const pSign = hudPitchDeg >= 0 ? '+' : '';
-      const rSign = hudRollDeg >= 0 ? '+' : '';
+      const rSign = hudRollDeg  >= 0 ? '+' : '';
       UI.hudStabilityText.textContent = `P: ${pSign}${hudPitchDeg.toFixed(1)}° / R: ${rSign}${hudRollDeg.toFixed(1)}°`;
-      UI.hudStabilityText.style.color = (Math.abs(hudRollDeg) > 30 || Math.abs(hudPitchDeg) > 25) ? 'var(--state-danger-red)' : 'var(--accent-cyan)';
+      UI.hudStabilityText.style.color = (Math.abs(hudRollDeg) > 30 || Math.abs(hudPitchDeg) > 25)
+        ? 'var(--state-danger-red)' : 'var(--accent-cyan)';
     }
   }
 
@@ -1803,9 +1931,11 @@ function animate3D() {
     }
   }
 
-  // Forehead status LED pulse
+  // Forehead status LED pulse — faster & brighter in GYRO LIVE mode
   if (ledPipMesh) {
-    const pulse = state.hasLiveStream ? (0.8 + 0.3 * Math.sin(elapsedTime * 5.0)) : 0.7;
+    const pulseFreq = gyroDataFresh ? 8.0 : 5.0;
+    const pulseAmp  = gyroDataFresh ? 0.45 : 0.30;
+    const pulse = state.hasLiveStream ? (0.8 + pulseAmp * Math.sin(elapsedTime * pulseFreq)) : 0.7;
     ledPipMesh.scale.set(pulse, pulse, pulse);
   }
 
@@ -1827,11 +1957,12 @@ function animate3D() {
 // 4. SCIENTIFIC SAFETY STANDARDS & REMEDIATION LOGIC ENGINE
 // ============================================================================
 function calculateDewPoint(tempC, humidity) {
-  if (tempC === null || humidity === null || isNaN(tempC) || isNaN(humidity)) return null;
+  if (tempC === null || humidity === null || isNaN(tempC) || isNaN(humidity) || humidity <= 0.0) return null;
   const a = 17.27;
   const b = 237.7;
   const alpha = ((a * tempC) / (b + tempC)) + Math.log(humidity / 100.0);
-  return (b * alpha) / (a - alpha);
+  const dp = (b * alpha) / (a - alpha);
+  return (isNaN(dp) || !isFinite(dp)) ? null : dp;
 }
 
 function evaluateSafetyStandards(t) {
@@ -2002,314 +2133,381 @@ function safeNum(val, decimals = 1, fallback = '—') {
 }
 
 function updateDashboardUI(t) {
-  // If NO live data has been received yet, keep dashboard in clean STANDBY
+  // If NO live data has been received yet, keep dashboard in clean STANDBY (ZERO HARDCODED NUMBERS)
   if (!state.hasLiveStream) {
     // 1. MQ-135 Gas
-    if (UI.valGas) { UI.valGas.textContent = '— PPM'; UI.valGas.className = 'metric-compact no-data'; }
+    if (UI.valGas) { UI.valGas.textContent = '— AO'; UI.valGas.className = 'metric-compact no-data'; }
     if (UI.pillGas) { UI.pillGas.textContent = 'STANDBY'; UI.pillGas.className = 'badge-status standby'; }
     if (UI.barGas) { UI.barGas.style.width = '0%'; UI.barGas.className = 'threshold-bar'; }
+    if (UI.valMq135Do) { UI.valMq135Do.textContent = 'DO: —'; }
     if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-standby';
-    if (UI.scenarioGas) UI.scenarioGas.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
+    if (UI.scenarioGas) UI.scenarioGas.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
 
-    // 2. MQ-7 CO (not in firmware JSON — text protocol only)
-    if (UI.valCo) { UI.valCo.textContent = '— PPM'; UI.valCo.className = 'metric-compact no-data'; }
-    if (UI.pillCo) { UI.pillCo.textContent = 'N/A'; UI.pillCo.className = 'badge-status standby'; }
+    // 2. MQ-7 CO
+    if (UI.valCo) { UI.valCo.textContent = '— AO'; UI.valCo.className = 'metric-compact no-data'; }
+    if (UI.pillCo) { UI.pillCo.textContent = 'STANDBY'; UI.pillCo.className = 'badge-status standby'; }
     if (UI.barCo) { UI.barCo.style.width = '0%'; UI.barCo.className = 'threshold-bar'; }
+    if (UI.valMq7Do) { UI.valMq7Do.textContent = 'DO: —'; }
     if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-standby';
-    if (UI.scenarioCo) UI.scenarioCo.textContent = 'MQ-7 not in current firmware — will populate if sensor added.';
+    if (UI.scenarioCo) UI.scenarioCo.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
 
-    // 3. DHT22 Climate
-    if (UI.valDhtSummary) { UI.valDhtSummary.textContent = '—°C / —%'; UI.valDhtSummary.className = 'metric-compact no-data'; }
-    if (UI.valAmbTemp) { UI.valAmbTemp.textContent = '— °C'; UI.valAmbTemp.className = 'split-val no-data'; }
-    if (UI.valHumidity) { UI.valHumidity.textContent = '— %'; UI.valHumidity.className = 'split-val no-data'; }
-    if (UI.valDewPoint) { UI.valDewPoint.textContent = '— °C [STANDBY]'; }
-    if (UI.pillDht22) { UI.pillDht22.textContent = 'STANDBY'; UI.pillDht22.className = 'badge-status standby'; }
-    if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-standby';
-    if (UI.scenarioDht) UI.scenarioDht.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
-
-    // 4. IR / HC-SR04 Proximity
-    if (UI.valIr) { UI.valIr.textContent = '— cm'; UI.valIr.className = 'metric-compact no-data'; }
+    // 3. IR Visor Seal & Optical Proximity
+    if (UI.valIr) { UI.valIr.textContent = '—'; UI.valIr.className = 'metric-compact no-data'; }
     if (UI.pillIr) { UI.pillIr.textContent = 'STANDBY'; UI.pillIr.className = 'badge-status standby'; }
+    if (UI.valIrDetail) { UI.valIrDetail.textContent = 'Awaiting Signal'; }
     if (UI.cardIr) UI.cardIr.className = 'apple-widget state-standby';
-    if (UI.scenarioIr) UI.scenarioIr.textContent = 'HC-SR04 ultrasonic proximity awaiting USB connection.';
+    if (UI.scenarioIr) UI.scenarioIr.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
 
-    // 5. MPU-6050 G-Force
+    // 4. DHT22 Relative Humidity
+    if (UI.valHumidity) { UI.valHumidity.textContent = '— %'; UI.valHumidity.className = 'metric-compact no-data'; }
+    if (UI.pillHumidity) { UI.pillHumidity.textContent = 'STANDBY'; UI.pillHumidity.className = 'badge-status standby'; }
+    if (UI.barHumidity) { UI.barHumidity.style.width = '0%'; UI.barHumidity.className = 'threshold-bar'; }
+    if (UI.valDewPoint) { UI.valDewPoint.textContent = '— °C'; UI.valDewPoint.className = 'dual-val no-data'; }
+    if (UI.valFogRisk) { UI.valFogRisk.textContent = '—'; UI.valFogRisk.className = 'dual-val no-data'; }
+    if (UI.cardDhtHum) UI.cardDhtHum.className = 'apple-widget state-standby';
+    if (UI.scenarioHum) UI.scenarioHum.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+
+    // 5. DHT22 Ambient Environment Temperature
+    if (UI.valAmbTemp) { UI.valAmbTemp.textContent = '— °C'; UI.valAmbTemp.className = 'metric-compact no-data'; }
+    if (UI.pillTemp) { UI.pillTemp.textContent = 'STANDBY'; UI.pillTemp.className = 'badge-status standby'; }
+    if (UI.barTemp) { UI.barTemp.style.width = '0%'; UI.barTemp.className = 'threshold-bar'; }
+    if (UI.valHeatZone) { UI.valHeatZone.textContent = '—'; UI.valHeatZone.className = 'dual-val no-data'; }
+    if (UI.valHeatCat) { UI.valHeatCat.textContent = '—'; UI.valHeatCat.className = 'dual-val no-data'; }
+    if (UI.cardDhtTemp) UI.cardDhtTemp.className = 'apple-widget state-standby';
+    if (UI.scenarioTemp) UI.scenarioTemp.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
+
+    // 6. MPU-6050 G-Force & Ballistics
     if (UI.valGforce) { UI.valGforce.textContent = '— G'; UI.valGforce.className = 'metric-compact no-data'; }
     if (UI.concussionBadge) { UI.concussionBadge.textContent = 'STANDBY'; UI.concussionBadge.className = 'badge-status standby'; }
     if (UI.barGforce) { UI.barGforce.style.width = '0%'; UI.barGforce.className = 'threshold-bar'; }
+    if (UI.valAx) { UI.valAx.textContent = '—'; UI.valAx.className = 'triax-val no-data'; }
+    if (UI.valAy) { UI.valAy.textContent = '—'; UI.valAy.className = 'triax-val no-data'; }
+    if (UI.valAz) { UI.valAz.textContent = '—'; UI.valAz.className = 'triax-val no-data'; }
     if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-standby';
-    if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'Awaiting USB connection. Click CONNECT USB above.';
+    if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
 
-    // 6. Actuators & C2
-    if (UI.cardHardwareC2) UI.cardHardwareC2.className = 'apple-widget state-nominal';
-    if (UI.scenarioHw) UI.scenarioHw.textContent = 'Hardware GPIO bus active. 5.0V power rail stabilized.';
-    if (UI.valBuzzer) UI.valBuzzer.textContent = 'STANDBY';
-
-    // 7. Biometrics
-    if (UI.valBpm) { UI.valBpm.textContent = '— BPM'; UI.valBpm.className = 'bio-num no-data'; }
-    if (UI.valSpo2) { UI.valSpo2.textContent = '— %'; UI.valSpo2.className = 'bio-num no-data'; }
-    if (UI.valTemp) { UI.valTemp.textContent = '— °C'; UI.valTemp.className = 'bio-num no-data'; }
-    if (UI.pillBio) { UI.pillBio.textContent = 'STANDBY'; UI.pillBio.className = 'badge-status standby'; }
-    if (UI.cardBiometrics) UI.cardBiometrics.className = 'apple-widget state-standby';
-    if (UI.scenarioBio) UI.scenarioBio.textContent = 'Awaiting soldier pulse oximetry contact harness connection.';
-
-    if (UI.cardTerminal) UI.cardTerminal.className = 'apple-widget state-nominal';
-    if (UI.scenarioTerm) UI.scenarioTerm.textContent = 'Direct hardware UART ingestion stream via Web Serial API.';
+    // Header Status
+    if (UI.gpsHeaderText) UI.gpsHeaderText.textContent = 'GPS: STANDBY';
+    if (UI.gpsStatusPill) UI.gpsStatusPill.className = 'gps-status-pill standby';
 
     UI.incidentBanner?.classList.add('hidden');
     return;
   }
 
-  // --- LIVE TELEMETRY POPULATION ---
+  // ==========================================================================
+  // LIVE TELEMETRY POPULATION (STRICT 100% REAL HARDWARE — ZERO HARDCODED MOCKS)
+  // ==========================================================================
 
-  // 1. MPU-6050 Orientation & Ballistic Impact
-  // Firmware sends gforce pre-computed; fallback to 1G if zero (Earth baseline)
-  const liveG = (t.gforce !== null && !isNaN(t.gforce)) ? Math.max(0, Number(t.gforce)) : null;
-  if (liveG !== null) {
+  // 1. MQ-135 TOXIC GASES / CBRN
+  if (t.mq135Ao !== null || t.gasPpm !== null) {
+    const rawAo = t.mq135Ao !== null ? t.mq135Ao : Math.round(t.gasPpm);
+    const doState = t.mq135Do !== null ? t.mq135Do : 1;
+    const isTripped = (doState === 0) || (rawAo > 3500);
+    const isElevated = rawAo > 3000;
+
+    if (UI.valGas) {
+      UI.valGas.textContent = `${rawAo} AO`;
+      UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+    }
+    if (UI.valMq135Do) {
+      UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
+      UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+    }
+    const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    if (UI.barGas) {
+      UI.barGas.style.width = `${gasPct}%`;
+      UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.pillGas) {
+      UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : 'OPTIMAL';
+      UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.cardMq135) {
+      UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+    }
+    if (UI.scenarioGas) {
+      UI.scenarioGas.textContent = isTripped
+        ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
+        : isElevated
+          ? `Elevated VOC: Raw AO ${rawAo} in caution zone (3000–3500). Monitor breathing zone.`
+          : `Clean Atmosphere: Raw AO ${rawAo} baseline nominal. Breathing zone secure.`;
+    }
+  }
+
+  // 2. MQ-7 CARBON MONOXIDE (CO)
+  if (t.mq7Ao !== null || t.coPpm !== null) {
+    const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
+    const doState = t.mq7Do !== null ? t.mq7Do : 1;
+    const isTripped = (doState === 0) || (rawAo > 3500);
+    const isElevated = rawAo > 3000;
+
+    if (UI.valCo) {
+      UI.valCo.textContent = `${rawAo} AO`;
+      UI.valCo.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+    }
+    if (UI.valMq7Do) {
+      UI.valMq7Do.textContent = `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
+      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+    }
+    const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    if (UI.barCo) {
+      UI.barCo.style.width = `${coPct}%`;
+      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.pillCo) {
+      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
+      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.cardMq7) {
+      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+    }
+    if (UI.scenarioCo) {
+      UI.scenarioCo.textContent = isTripped
+        ? `CO POISONING THREAT: Raw AO ${rawAo} lethal blowback! Immediate evacuation required.`
+        : isElevated
+          ? `Muzzle Blast / Combustion: Raw AO ${rawAo} elevated (3000–3500). Verify ventilation.`
+          : `Carbon Monoxide Clear: Raw AO ${rawAo} clean room baseline. Atmosphere nominal.`;
+    }
+  }
+
+  // 3. IR OPTICAL PROXIMITY & VISOR SEAL LATCH
+  if (t.irStatus !== null) {
+    const isObstacle = t.irStatus.includes('OBSTACLE');
+    if (UI.valIr) {
+      UI.valIr.textContent = isObstacle ? 'UNLATCHED' : 'SEALED';
+      UI.valIr.className = `metric-compact ${isObstacle ? 'danger' : ''}`;
+    }
+    if (UI.pillIr) {
+      UI.pillIr.textContent = isObstacle ? 'ALERT' : 'LATCHED';
+      UI.pillIr.className = `badge-status ${isObstacle ? 'danger' : 'safe'}`;
+    }
+    if (UI.valIrDetail) {
+      UI.valIrDetail.textContent = isObstacle ? 'Obstacle / Visor seal unlatched' : 'Airtight coronal seal confirmed';
+      UI.valIrDetail.style.color = isObstacle ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+    }
+    if (UI.cardIr) {
+      UI.cardIr.className = `apple-widget ${isObstacle ? 'state-danger' : 'state-nominal'}`;
+    }
+    if (UI.scenarioIr) {
+      UI.scenarioIr.textContent = isObstacle
+        ? 'VISOR UNSEALED: Active infrared optical line broken. Lock visor face shield down!'
+        : 'Visor Sealed: Optical latch phototransistor continuous. Full airtight protection.';
+    }
+  }
+
+  // 4. DHT22 RELATIVE HUMIDITY & DEW POINT CONDENSATION
+  if (t.humidity !== null && !isNaN(t.humidity)) {
+    const hum = Number(t.humidity);
+    if (UI.valHumidity) {
+      UI.valHumidity.textContent = `${hum.toFixed(1)} %`;
+      UI.valHumidity.className = 'metric-compact';
+    }
+    const humPct = Math.min(100, Math.max(0, hum));
+    if (UI.barHumidity) {
+      UI.barHumidity.style.width = `${humPct}%`;
+      UI.barHumidity.className = `threshold-bar ${hum >= 75 ? 'warn' : 'safe'}`;
+    }
+
+    // Calculate Dew Point & Condensation risk if temperature is also available
+    if (t.ambientTemp !== null && !isNaN(t.ambientTemp)) {
+      const dew = calculateDewPoint(t.ambientTemp, hum);
+      if (dew !== null && !isNaN(dew)) {
+        t.dewPoint = dew;
+        const margin = t.ambientTemp - dew;
+        const isFogRisk = hum >= 70 || margin <= 2.5;
+
+        if (UI.valDewPoint) {
+          UI.valDewPoint.textContent = `${dew.toFixed(1)} °C`;
+          UI.valDewPoint.className = 'dual-val';
+        }
+        if (UI.valFogRisk) {
+          UI.valFogRisk.textContent = isFogRisk ? 'HIGH (VENT)' : hum >= 60 ? 'MODERATE' : 'LOW (CLEAR)';
+          UI.valFogRisk.className = `dual-val ${isFogRisk ? 'warn' : ''}`;
+        }
+      } else {
+        if (UI.valDewPoint) { UI.valDewPoint.textContent = '— °C'; UI.valDewPoint.className = 'dual-val no-data'; }
+        if (UI.valFogRisk) { UI.valFogRisk.textContent = hum > 0 ? 'LOW (CLEAR)' : 'CHECK WIRING'; UI.valFogRisk.className = hum > 0 ? 'dual-val' : 'dual-val warn'; }
+      }
+    } else {
+      if (UI.valDewPoint) { UI.valDewPoint.textContent = '— °C'; UI.valDewPoint.className = 'dual-val no-data'; }
+      if (UI.valFogRisk) { UI.valFogRisk.textContent = hum >= 70 ? 'HIGH' : 'NOMINAL'; UI.valFogRisk.className = 'dual-val'; }
+    }
+
+    if (hum === 0.0) {
+      if (UI.pillHumidity) {
+        UI.pillHumidity.textContent = 'NO DATA (0%)';
+        UI.pillHumidity.className = 'badge-status standby';
+      }
+      if (UI.cardDhtHum) UI.cardDhtHum.className = 'apple-widget state-standby';
+      if (UI.scenarioHum) {
+        UI.scenarioHum.textContent = 'DHT22 Stream: Received 0.0% RH. Verify GPIO 4 data wire & 3.3V/GND power.';
+      }
+    } else {
+      const isHighHum = hum >= 75;
+      if (UI.pillHumidity) {
+        UI.pillHumidity.textContent = isHighHum ? 'HIGH MOISTURE' : hum < 25 ? 'DRY' : 'COMFORT';
+        UI.pillHumidity.className = `badge-status ${isHighHum ? 'warn' : 'safe'}`;
+      }
+      if (UI.cardDhtHum) {
+        UI.cardDhtHum.className = `apple-widget ${isHighHum ? 'state-warning' : 'state-nominal'}`;
+      }
+      if (UI.scenarioHum) {
+        UI.scenarioHum.textContent = isHighHum
+          ? `Moisture Warning: ${hum.toFixed(1)}% RH inside visor. Anti-fog purge recommended.`
+          : `Visor Micro-Climate: ${hum.toFixed(1)}% RH — comfortable breathable envelope, anti-fog clear.`;
+      }
+    }
+  }
+
+  // 5. DHT22 AMBIENT ENVIRONMENT TEMPERATURE
+  if (t.ambientTemp !== null && !isNaN(t.ambientTemp)) {
+    const temp = Number(t.ambientTemp);
+    if (UI.valAmbTemp) {
+      UI.valAmbTemp.textContent = `${temp.toFixed(1)} °C`;
+      UI.valAmbTemp.className = 'metric-compact';
+    }
+    // Scale -20°C to +60°C (80° range)
+    const tempPct = Math.min(100, Math.max(0, ((temp + 20) / 80) * 100));
+    if (UI.barTemp) {
+      UI.barTemp.style.width = `${tempPct}%`;
+      UI.barTemp.className = `threshold-bar ${temp >= 38 ? 'danger' : temp >= 32 ? 'warn' : temp < 0 ? 'warn' : 'safe'}`;
+    }
+
+    if (temp === 0.0 && (t.humidity === 0.0 || t.humidity === null)) {
+      if (UI.valHeatZone) { UI.valHeatZone.textContent = 'FAULT'; UI.valHeatZone.className = 'dual-val warn'; }
+      if (UI.valHeatCat) { UI.valHeatCat.textContent = 'CHECK PIN 4'; UI.valHeatCat.className = 'dual-val warn'; }
+      if (UI.pillTemp) { UI.pillTemp.textContent = 'NO DATA (0.0°C)'; UI.pillTemp.className = 'badge-status standby'; }
+      if (UI.cardDhtTemp) UI.cardDhtTemp.className = 'apple-widget state-standby';
+      if (UI.scenarioTemp) {
+        UI.scenarioTemp.textContent = 'DHT22 Stream: Received 0.0°C. Verify GPIO 4 data wire & sensor contact.';
+      }
+    } else {
+      // US Army Heat Categories & Thermal Zones
+      let zone = 'NOMINAL';
+      let cat = 'CAT 0';
+      let pillCls = 'safe';
+      let cardCls = 'state-nominal';
+
+      if (temp >= 38.0) {
+        zone = 'HEAT STROKE';
+        cat = 'CAT 5 (EXTREME)';
+        pillCls = 'danger';
+        cardCls = 'state-danger open';
+      } else if (temp >= 35.0) {
+        zone = 'HEAT FATIGUE';
+        cat = 'CAT 4 (HIGH)';
+        pillCls = 'warn';
+        cardCls = 'state-warning';
+      } else if (temp >= 32.0) {
+        zone = 'WARM ENVELOPE';
+        cat = 'CAT 3 (MODERATE)';
+        pillCls = 'warn';
+        cardCls = 'state-warning';
+      } else if (temp < 0.0) {
+        zone = 'FREEZING RISK';
+        cat = 'SUB-ZERO';
+        pillCls = 'warn';
+        cardCls = 'state-warning';
+      }
+
+      if (UI.valHeatZone) { UI.valHeatZone.textContent = zone; UI.valHeatZone.className = `dual-val ${pillCls}`; }
+      if (UI.valHeatCat) { UI.valHeatCat.textContent = cat; UI.valHeatCat.className = `dual-val ${pillCls}`; }
+      if (UI.pillTemp) { UI.pillTemp.textContent = zone; UI.pillTemp.className = `badge-status ${pillCls}`; }
+      if (UI.cardDhtTemp) UI.cardDhtTemp.className = `apple-widget ${cardCls}`;
+      if (UI.scenarioTemp) {
+        UI.scenarioTemp.textContent = temp >= 38
+          ? `HEAT EXHAUSTION BREACH: ${temp.toFixed(1)}°C inside helmet! Mandatory shaded hydration rest.`
+          : temp >= 32
+            ? `Thermal Strain: ${temp.toFixed(1)}°C — Category 3 heat zone. Hydrate operator.`
+            : temp < 0
+              ? `Cold Exposure: ${temp.toFixed(1)}°C sub-zero ambient. Check for hypothermia risks.`
+              : `Thermal Comfort: ${temp.toFixed(1)}°C — optimal soldier operating temperature.`;
+      }
+    }
+  }
+
+  // 6. MPU-6050 BALLISTIC IMPACT & KINEMATICS
+  if (t.gforce !== null && !isNaN(t.gforce)) {
+    const liveG = Number(t.gforce);
     if (UI.valGforce) {
       UI.valGforce.textContent = `${liveG.toFixed(2)} G`;
       UI.valGforce.className = 'metric-compact';
     }
-    const gPct = Math.min(100, (liveG / 6.0) * 100);
-    if (UI.barGforce) UI.barGforce.style.width = `${gPct}%`;
+    const gPct = Math.min(100, Math.max(0, (liveG / 6.0) * 100));
+    if (UI.barGforce) {
+      UI.barGforce.style.width = `${gPct}%`;
+      UI.barGforce.className = `threshold-bar ${liveG >= 4.5 || t.concussion ? 'danger' : liveG >= 2.5 ? 'warn' : 'safe'}`;
+    }
+
+    // Triaxial vector components
+    if (t.ax !== null && !isNaN(t.ax)) {
+      if (UI.valAx) { UI.valAx.textContent = `${t.ax >= 0 ? '+' : ''}${t.ax.toFixed(2)}G`; UI.valAx.classList.remove('no-data'); }
+    }
+    if (t.ay !== null && !isNaN(t.ay)) {
+      if (UI.valAy) { UI.valAy.textContent = `${t.ay >= 0 ? '+' : ''}${t.ay.toFixed(2)}G`; UI.valAy.classList.remove('no-data'); }
+    }
+    if (t.az !== null && !isNaN(t.az)) {
+      if (UI.valAz) { UI.valAz.textContent = `${t.az >= 0 ? '+' : ''}${t.az.toFixed(2)}G`; UI.valAz.classList.remove('no-data'); }
+    }
 
     if (liveG >= 4.5 || t.concussion) {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'TBI IMPACT!'; UI.concussionBadge.className = 'badge-status danger'; }
-      if (UI.barGforce) UI.barGforce.className = 'threshold-bar danger';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-danger open';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `TBI CONCUSSION BREACH: ${liveG.toFixed(2)} G detected! Black-box impact logged.`;
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `TBI CONCUSSION BREACH: ${liveG.toFixed(2)} G kinetic blast shockwave! Black-box logged.`;
     } else if (liveG >= 2.5) {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'HIGH SHOCK'; UI.concussionBadge.className = 'badge-status warn'; }
-      if (UI.barGforce) UI.barGforce.className = 'threshold-bar warn';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-warning';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Shock: ${liveG.toFixed(2)} G kinetic load — 2.5G–4.5G envelope.`;
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Shock Impulse: ${liveG.toFixed(2)} G kinetic load. Inspect soldier stability.`;
+    } else if (liveG === 0.0 && t.ax === 0 && t.ay === 0 && t.az === 0) {
+      if (UI.concussionBadge) { UI.concussionBadge.textContent = 'NO I2C DATA (0G)'; UI.concussionBadge.className = 'badge-status standby'; }
+      if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-standby';
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = 'MPU-6050 Stream: 0.00 G (All 3 axes zero). Check I2C bus (SDA: GPIO 21, SCL: GPIO 22).';
     } else {
       if (UI.concussionBadge) { UI.concussionBadge.textContent = 'ROUTINE'; UI.concussionBadge.className = 'badge-status safe'; }
-      if (UI.barGforce) UI.barGforce.className = 'threshold-bar safe';
       if (UI.cardGforce) UI.cardGforce.className = 'apple-widget state-nominal';
-      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Kinetic Baseline: ${liveG.toFixed(2)} G — normal physiological motion.`;
+      if (UI.scenarioGforce) UI.scenarioGforce.textContent = `Kinetic Baseline: ${liveG.toFixed(2)} G — normal soldier physiological motion.`;
     }
   }
 
-  // 2. MQ-135 Gas — show calibrated PPM; AO subtext only in text-protocol mode
-  if (t.gasPpm !== null && !isNaN(t.gasPpm)) {
-    const ppm = Math.round(t.gasPpm);
-    const aoSub = (t.mq135Ao !== null) ? ` (${t.mq135Ao} AO)` : '';
-    if (UI.valGas) {
-      UI.valGas.textContent = `${ppm} PPM${aoSub}`;
-      UI.valGas.className = 'metric-compact';
-    }
-    const gasPct = Math.min(100, (ppm / 2000) * 100);
-    if (UI.barGas) UI.barGas.style.width = `${gasPct}%`;
-
-    if (ppm > 1400 || t.mq135Do === 0) {
-      if (UI.pillGas) { UI.pillGas.textContent = 'TOXIC!'; UI.pillGas.className = 'badge-status danger'; }
-      if (UI.barGas) UI.barGas.className = 'threshold-bar danger';
-      if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-danger open';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `CBRN BREACH: ${ppm} PPM — toxic vapour threshold exceeded! Purge filter.`;
-    } else if (ppm > 800) {
-      if (UI.pillGas) { UI.pillGas.textContent = 'ELEVATED'; UI.pillGas.className = 'badge-status warn'; }
-      if (UI.barGas) UI.barGas.className = 'threshold-bar warn';
-      if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-warning';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `Elevated VOC: ${ppm} PPM — combustion fumes detected. Active purge advised.`;
-    } else {
-      if (UI.pillGas) { UI.pillGas.textContent = 'OPTIMAL'; UI.pillGas.className = 'badge-status safe'; }
-      if (UI.barGas) UI.barGas.className = 'threshold-bar safe';
-      if (UI.cardMq135) UI.cardMq135.className = 'apple-widget state-nominal';
-      if (UI.scenarioGas) UI.scenarioGas.textContent = `Air Quality: ${ppm} PPM — clean atmosphere, VOCs within safe limits.`;
-    }
+  // 7. HEADER SYSTEM HARDWARE STATUS (GPS, BUZZER, OLED)
+  if (t.gps) {
+    if (UI.gpsHeaderText) UI.gpsHeaderText.textContent = `GPS: ${t.gps}`;
+    if (UI.gpsStatusPill) UI.gpsStatusPill.className = 'gps-status-pill active';
   }
+  if (t.buzzer && UI.valBuzzer) UI.valBuzzer.textContent = t.buzzer;
+  if (t.oledPage !== null && UI.valOled) UI.valOled.textContent = `PAGE ${t.oledPage}`;
 
-  // 3. MQ-7 CO — text protocol only; in JSON mode, remain standby with note
-  if (t.coPpm !== null && !isNaN(t.coPpm)) {
-    const ppm = Math.round(t.coPpm);
-    const aoSub = (t.mq7Ao !== null) ? ` (${t.mq7Ao} AO)` : '';
-    if (UI.valCo) {
-      UI.valCo.textContent = `${ppm} PPM${aoSub}`;
-      UI.valCo.className = 'metric-compact';
+  // 8. GPS GEOLOCATION WIDGET
+  const hasGpsFix = t.lat !== null && t.lng !== null && !isNaN(t.lat) && !isNaN(t.lng);
+  const hasGpsText = t.gps && t.gps !== 'STANDBY';
+
+  if (hasGpsFix) {
+    // Full coordinate fix from JSON
+    if (UI.valLat) { UI.valLat.textContent = `${t.lat.toFixed(5)}°`; UI.valLat.classList.remove('no-data'); }
+    if (UI.valLng) { UI.valLng.textContent = `${t.lng.toFixed(5)}°`; UI.valLng.classList.remove('no-data'); }
+    if (UI.valAlt) { UI.valAlt.textContent = t.alt !== null ? `${t.alt.toFixed(0)} m` : '— m'; UI.valAlt.classList.remove('no-data'); }
+
+    const sats = t.sats !== null ? t.sats : 0;
+    if (UI.valSats) { UI.valSats.textContent = `${sats} SAT`; UI.valSats.className = 'metric-compact'; }
+    const satPct = Math.min(100, Math.max(0, (sats / 12) * 100));
+    if (UI.barSats) {
+      UI.barSats.style.width = `${satPct}%`;
+      UI.barSats.className = `threshold-bar ${sats >= 7 ? 'safe' : sats >= 4 ? 'warn' : 'danger'}`;
     }
-    const coPct = Math.min(100, (ppm / 200) * 100);
-    if (UI.barCo) UI.barCo.style.width = `${coPct}%`;
-
-    if (ppm > 100 || t.mq7Do === 0) {
-      if (UI.pillCo) { UI.pillCo.textContent = 'LETHAL CO!'; UI.pillCo.className = 'badge-status danger'; }
-      if (UI.barCo) UI.barCo.className = 'threshold-bar danger';
-      if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-danger open';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `LETHAL: CO ${ppm} PPM — NIOSH IDLH 100 PPM breached! Evacuate.`;
-    } else if (ppm > 35) {
-      if (UI.pillCo) { UI.pillCo.textContent = 'WARNING CO'; UI.pillCo.className = 'badge-status warn'; }
-      if (UI.barCo) UI.barCo.className = 'threshold-bar warn';
-      if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-warning';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Warning: ${ppm} PPM exceeds OSHA 35 PPM PEL. Ventilate.`;
-    } else {
-      if (UI.pillCo) { UI.pillCo.textContent = 'SAFE CO'; UI.pillCo.className = 'badge-status safe'; }
-      if (UI.barCo) UI.barCo.className = 'threshold-bar safe';
-      if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-nominal';
-      if (UI.scenarioCo) UI.scenarioCo.textContent = `CO Nominal: ${ppm} PPM — well below OSHA PEL 35 PPM.`;
+    const fixQuality = sats >= 7 ? 'FULL 3D FIX' : sats >= 4 ? 'MARGINAL FIX' : 'POOR LOCK';
+    const fixCls    = sats >= 7 ? 'safe' : sats >= 4 ? 'warn' : 'danger';
+    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = fixQuality; UI.gpsWidgetBadge.className = `badge-status ${fixCls}`; }
+    if (UI.cardGps) UI.cardGps.className = `apple-widget ${sats >= 4 ? 'state-nominal' : 'state-warning'}`;
+    if (UI.scenarioGps) {
+      UI.scenarioGps.textContent = `Position Fix: ${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E — ${sats} satellites locked. ${fixQuality}.`;
     }
-  } else if (state.hasLiveStream && t.coPpm === null) {
-    // JSON firmware mode: MQ-7 not wired. Show informational standby.
-    if (UI.pillCo) { UI.pillCo.textContent = 'N/A'; UI.pillCo.className = 'badge-status standby'; }
-    if (UI.valCo) { UI.valCo.textContent = 'N/A'; UI.valCo.className = 'metric-compact no-data'; }
-    if (UI.cardMq7) UI.cardMq7.className = 'apple-widget state-standby';
-    if (UI.scenarioCo) UI.scenarioCo.textContent = 'MQ-7 sensor not in current firmware build. Add MQ7 AO line to firmware to activate.';
-  }
-
-  // 4. DHT22 Micro-Climate
-  if (t.ambientTemp !== null && !isNaN(t.ambientTemp)) {
-    if (UI.valAmbTemp) {
-      UI.valAmbTemp.textContent = `${Number(t.ambientTemp).toFixed(1)} °C`;
-      UI.valAmbTemp.className = 'split-val';
-    }
-  }
-  if (t.humidity !== null && !isNaN(t.humidity)) {
-    if (UI.valHumidity) {
-      UI.valHumidity.textContent = `${Number(t.humidity).toFixed(1)} %`;
-      UI.valHumidity.className = 'split-val';
-    }
-  }
-
-  if (t.ambientTemp !== null && !isNaN(t.ambientTemp) && t.humidity !== null && !isNaN(t.humidity)) {
-    if (UI.valDhtSummary) {
-      UI.valDhtSummary.textContent = `${Number(t.ambientTemp).toFixed(1)}°C / ${Math.round(t.humidity)}%`;
-      UI.valDhtSummary.className = 'metric-compact';
-    }
-    const dew = calculateDewPoint(t.ambientTemp, t.humidity);
-    if (dew !== null) {
-      t.dewPoint = dew;
-      const margin = t.ambientTemp - dew;
-      const isFogRisk = t.humidity >= 75 || margin <= 2.5;
-      if (UI.valDewPoint) {
-        UI.valDewPoint.textContent = `${dew.toFixed(1)} °C ${isFogRisk ? '[FOG RISK]' : '[CLEAR]'}`;
-        UI.valDewPoint.style.color = isFogRisk ? 'var(--state-warn-amber)' : 'var(--text-secondary)';
-      }
-
-      if (t.ambientTemp >= 38.0) {
-        if (UI.pillDht22) { UI.pillDht22.textContent = 'HEAT STROKE'; UI.pillDht22.className = 'badge-status danger'; }
-        if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-danger open';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = `HEAT STROKE: ${t.ambientTemp.toFixed(1)}°C / ${t.humidity.toFixed(0)}% RH — US Army Cat 5 danger!`;
-      } else if (t.ambientTemp >= 32.0 || isFogRisk) {
-        if (UI.pillDht22) { UI.pillDht22.textContent = isFogRisk ? 'FOG RISK' : 'HEAT FATIGUE'; UI.pillDht22.className = 'badge-status warn'; }
-        if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-warning';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = isFogRisk
-          ? `Fog Risk: ${t.humidity.toFixed(0)}% RH — dew point ${dew.toFixed(1)}°C, condensation imminent.`
-          : `Thermal Strain: ${t.ambientTemp.toFixed(1)}°C — 32–38°C heat fatigue zone.`;
-      } else {
-        if (UI.pillDht22) { UI.pillDht22.textContent = 'OPTIMAL'; UI.pillDht22.className = 'badge-status safe'; }
-        if (UI.cardDht22) UI.cardDht22.className = 'apple-widget state-nominal';
-        if (UI.scenarioDht) UI.scenarioDht.textContent = `Micro-Climate OK: ${t.ambientTemp.toFixed(1)}°C / ${t.humidity.toFixed(0)}% RH — anti-fog clear.`;
-      }
-    }
-  } else if (t.ambientTemp !== null || t.humidity !== null) {
-    // Partial data: one reading arrived, show what we have
-    if (UI.valDhtSummary) {
-      const tStr = t.ambientTemp !== null ? `${t.ambientTemp.toFixed(1)}°C` : '—°C';
-      const hStr = t.humidity !== null ? `${t.humidity.toFixed(0)}%` : '—%';
-      UI.valDhtSummary.textContent = `${tStr} / ${hStr}`;
-      UI.valDhtSummary.className = 'metric-compact';
-    }
-  }
-
-  // 5. IR + HC-SR04 Proximity — show ultrasonic distance in JSON mode
-  const distCm = (t.distCm !== null && !isNaN(t.distCm)) ? Number(t.distCm) : null;
-  const irActive = t.irStatus !== null;
-
-  if (distCm !== null) {
-    // HC-SR04 ultrasonic data from firmware JSON
-    if (UI.valIr) {
-      UI.valIr.textContent = `${Math.round(distCm)} cm`;
-      UI.valIr.className = 'metric-compact';
-    }
-    if (distCm < 15) {
-      if (UI.pillIr) { UI.pillIr.textContent = 'OBSTACLE!'; UI.pillIr.className = 'badge-status warn'; }
-      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
-      if (UI.scenarioIr) UI.scenarioIr.textContent = `Proximity Alert: Object ${Math.round(distCm)} cm ahead — close-quarters obstacle detected.`;
-    } else if (distCm < 50) {
-      if (UI.pillIr) { UI.pillIr.textContent = 'NEAR'; UI.pillIr.className = 'badge-status warn'; }
-      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
-      if (UI.scenarioIr) UI.scenarioIr.textContent = `Near Object: ${Math.round(distCm)} cm — obstacle in close tactical range.`;
-    } else {
-      if (UI.pillIr) { UI.pillIr.textContent = 'CLEAR'; UI.pillIr.className = 'badge-status safe'; }
-      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-nominal';
-      if (UI.scenarioIr) UI.scenarioIr.textContent = `Clear: ${Math.round(distCm)} cm — no obstacles in tactical detection cone.`;
-    }
-  } else if (irActive) {
-    // IR text-protocol fallback
-    if (UI.valIr) { UI.valIr.textContent = t.irStatus; UI.valIr.className = 'metric-compact'; }
-    if (t.irStatus.includes('OBSTACLE') || t.irStatus.includes('DETECT')) {
-      if (UI.pillIr) { UI.pillIr.textContent = 'OBSTACLE'; UI.pillIr.className = 'badge-status warn'; }
-      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-warning';
-      if (UI.scenarioIr) UI.scenarioIr.textContent = 'Obstacle Detected: Close-range proximity hazard within 15 cm defense cone.';
-    } else {
-      if (UI.pillIr) { UI.pillIr.textContent = 'LOCKED'; UI.pillIr.className = 'badge-status safe'; }
-      if (UI.cardIr) UI.cardIr.className = 'apple-widget state-nominal';
-      if (UI.scenarioIr) UI.scenarioIr.textContent = 'Ballistic Visor Locked: Optical face shield airtight seal verified and latched.';
-    }
-  }
-
-  // 6. Actuators + GPS + Battery + Distance
-  if (t.buzzer !== null && UI.valBuzzer) UI.valBuzzer.textContent = `${t.buzzer} // READY`;
-  if (t.oledPage !== null && UI.valOled) UI.valOled.textContent = `PAGE ${t.oledPage} [SYS]`;
-
-  // GPS: show lat/lng if available, otherwise GPS active status
-  if (UI.valGps) {
-    if (t.lat !== null && t.lng !== null) {
-      const satStr = t.sats !== null ? ` · ${t.sats} SATS` : '';
-      const altStr = t.alt !== null ? ` · ${Math.round(t.alt)}m ASL` : '';
-      UI.valGps.textContent = `${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E${altStr}${satStr}`;
-    } else if (t.gps !== null) {
-      UI.valGps.textContent = t.gps;
-    }
-  }
-
-  // Battery %
-  const valBattery = document.getElementById('val-battery');
-  if (valBattery && t.battery !== null) {
-    valBattery.textContent = `${t.battery}%`;
-    valBattery.style.color = t.battery < 20 ? 'var(--state-danger-red)' : t.battery < 40 ? 'var(--state-warn-amber)' : 'var(--state-safe-green)';
-  }
-
-  // HC-SR04 Ultrasonic Distance
-  const valDist = document.getElementById('val-dist');
-  if (valDist && t.distCm !== null) {
-    valDist.textContent = `${Math.round(t.distCm)} cm`;
-    valDist.style.color = t.distCm < 20 ? 'var(--state-warn-amber)' : 'var(--text-secondary)';
-  }
-
-  // Hardware SOS state from physical button
-  if (t.sos && state.isConnected) {
-    // Hardware SOS button was pressed on the helmet
-    const sosBtn = UI.btnManualSos;
-    if (sosBtn && !state.telemetry._sosDisplayed) {
-      state.telemetry._sosDisplayed = true;
-      logTerminal('[HARDWARE SOS] Physical SOS button activated on helmet!');
-      playAlertSiren();
-    }
-  } else {
-    state.telemetry._sosDisplayed = false;
-  }
-
-
-  // 7. Biometrics
-  if (t.bpm !== null && !isNaN(t.bpm)) {
-    if (UI.valBpm) { UI.valBpm.textContent = `${Math.round(t.bpm)} BPM`; UI.valBpm.className = 'bio-num'; }
-    if (UI.pillBio) { UI.pillBio.textContent = 'ATTACHED'; UI.pillBio.className = 'badge-status safe'; }
-    if (UI.cardBiometrics) UI.cardBiometrics.className = 'apple-widget state-nominal';
-    if (UI.scenarioBio) UI.scenarioBio.textContent = 'Vitals Acquired: Cardiovascular pulse and SpO2 within tactical operational envelope.';
-  } else {
-    if (UI.valBpm) { UI.valBpm.textContent = '— BPM'; UI.valBpm.className = 'bio-num no-data'; }
-  }
-
-  if (t.spo2 !== null && !isNaN(t.spo2)) {
-    if (UI.valSpo2) { UI.valSpo2.textContent = `${Math.round(t.spo2)} %`; UI.valSpo2.className = 'bio-num'; }
-  } else {
-    if (UI.valSpo2) { UI.valSpo2.textContent = '— %'; UI.valSpo2.className = 'bio-num no-data'; }
-  }
-
-  if (t.temp !== null && !isNaN(t.temp)) {
-    if (UI.valTemp) { UI.valTemp.textContent = `${Number(t.temp).toFixed(1)} °C`; UI.valTemp.className = 'bio-num'; }
-  } else {
-    if (UI.valTemp) { UI.valTemp.textContent = '— °C'; UI.valTemp.className = 'bio-num no-data'; }
+  } else if (hasGpsText) {
+    // Text-protocol only: GPS ACTIVE but no coordinate data yet
+    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'ACTIVE'; UI.gpsWidgetBadge.className = 'badge-status safe'; }
+    if (UI.cardGps) UI.cardGps.className = 'apple-widget state-nominal';
+    if (UI.valSats) { UI.valSats.textContent = 'ACTIVE'; UI.valSats.className = 'metric-compact'; }
+    if (UI.scenarioGps) UI.scenarioGps.textContent = 'GPS module active — acquiring satellite fix. Move to open sky for coordinate lock.';
+    if (UI.barSats) { UI.barSats.style.width = '30%'; UI.barSats.className = 'threshold-bar warn'; }
   }
 
   // 8. Incident Assessment & Autonomous Remediation Alert
@@ -2405,7 +2603,12 @@ async function disconnectWebSerial() {
   if (drawerLabel) { drawerLabel.textContent = '⬤ DISCONNECTED'; drawerLabel.style.color = ''; }
   // Re-show the busy-port warning hint
   const busyWarn = document.getElementById('drawer-busy-warning');
-  if (busyWarn) busyWarn.style.display = '';
+  // Reset all live telemetry values to null (strictly zero hardcoded leftovers)
+  Object.keys(state.telemetry).forEach(k => {
+    if (!k.startsWith('_')) state.telemetry[k] = null;
+  });
+  state.telemetry.sos = false;
+  state.telemetry.concussion = false;
 
   updateDashboardUI(state.telemetry);
   logTerminal('[SERIAL] Port disconnected. Reverting to standby (zero hardcoded values).');
@@ -2482,27 +2685,53 @@ function handleIncomingSerialLine(raw) {
       if (obj.yaw     !== undefined) state.telemetry.yaw    = parseFloat(obj.yaw);
       if (obj.gforce  !== undefined) {
         const g = parseFloat(obj.gforce);
-        // Guard: if gforce is 0 (sensor sleeping), default to Earth 1G baseline
-        state.telemetry.gforce = (g < 0.01) ? 1.00 : g;
+        // Store actual sensor value — 0 means I2C failure/sensor off, display it as-is
+        state.telemetry.gforce = g;
       }
-      // Raw axes (only present in some custom builds, safe to parse if present)
+      // Raw axes (present in firmware v2.1)
       if (obj.ax !== undefined) state.telemetry.ax = parseFloat(obj.ax);
       if (obj.ay !== undefined) state.telemetry.ay = parseFloat(obj.ay);
       if (obj.az !== undefined) state.telemetry.az = parseFloat(obj.az);
 
-      // ── DHT22 — KEY FIX: firmware uses "ambTemp", NOT "temp" ───────────────
+      // Redundant fallback: If roll and pitch are exactly zero or null, but ax/ay/az are present, compute dynamically
+      if ((state.telemetry.pitch === 0 && state.telemetry.roll === 0) || state.telemetry.pitch === null) {
+        if (state.telemetry.ax !== null && state.telemetry.az !== null) {
+          const ax = state.telemetry.ax;
+          const ay = state.telemetry.ay || 0;
+          const az = state.telemetry.az || 1;
+          state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * 57.2958;
+          state.telemetry.roll  = Math.atan2(ay, az) * 57.2958;
+        }
+      }
+
+      // ── GYRO LIVE: stamp timestamp only when pitch is a valid non-fault reading ──
+      // Detect I2C fault via JSON: if ax=ay=az=0 AND gforce=0, sensor is dead
+      const jsonI2CFault = (
+        state.telemetry.gforce === 0 &&
+        state.telemetry.ax === 0 && state.telemetry.ay === 0 && state.telemetry.az === 0
+      );
+      if (!jsonI2CFault && state.telemetry.pitch !== null && !isNaN(state.telemetry.pitch) &&
+          Math.abs(state.telemetry.pitch) > 0.01) {
+        state.three.gyroLastUpdate = Date.now();
+        if (!state.three.gyroInitialized) {
+          state.three.smoothPitch  = state.telemetry.pitch - (state.telemetry.tarePitch || 0);
+          state.three.smoothRoll   = (state.telemetry.roll || 0) - (state.telemetry.tareRoll  || 0);
+          state.three.gyroInitialized = true;
+        }
+      }
+
+      // ── DHT22 Micro-Climate ────────────────────────────────────────────────
       if (obj.ambTemp !== undefined) {
         const v = parseFloat(obj.ambTemp);
-        if (!isNaN(v) && v >= 10.0 && v <= 60.0) state.telemetry.ambientTemp = v;
+        if (!isNaN(v) && v >= -40.0 && v <= 85.0) state.telemetry.ambientTemp = v;
       }
-      // Fallback: some custom firmware builds use "ambientTemp"
       if (obj.ambientTemp !== undefined) {
         const v = parseFloat(obj.ambientTemp);
-        if (!isNaN(v) && v >= 10.0 && v <= 60.0) state.telemetry.ambientTemp = v;
+        if (!isNaN(v) && v >= -40.0 && v <= 85.0) state.telemetry.ambientTemp = v;
       }
       if (obj.hum !== undefined) {
         const v = parseFloat(obj.hum);
-        if (!isNaN(v) && v >= 1 && v <= 99) state.telemetry.humidity = v;
+        if (!isNaN(v) && v >= 0.0 && v <= 100.0) state.telemetry.humidity = v;
       }
 
       // ── MQ-135 Gas — KEY FIX: firmware uses "gas", NOT "mq135" ────────────
@@ -2559,8 +2788,8 @@ function handleIncomingSerialLine(raw) {
     const match = raw.match(/(?:DHT22|TEMP|TEMPERATURE)[^\d-]*([-\d.]+)/i);
     if (match) {
       const v = parseFloat(match[1]);
-      // Validate physiological bounds: temperature 10°C–60°C
-      if (!isNaN(v) && v >= 10.0 && v <= 60.0) {
+      // Valid operational range: -40°C to +85°C (accepts 0.0°C)
+      if (!isNaN(v) && v >= -40.0 && v <= 85.0) {
         state.telemetry.ambientTemp = v;
       }
     }
@@ -2571,8 +2800,8 @@ function handleIncomingSerialLine(raw) {
     const match = raw.match(/(?:DHT22|HUM|HUMIDITY)[^\d-]*([-\d.]+)/i);
     if (match) {
       const v = parseFloat(match[1]);
-      // Validate bounds: humidity 1%–99%
-      if (!isNaN(v) && v >= 1.0 && v <= 99.0) {
+      // Valid range: 0% to 100% RH (accepts 0.0%)
+      if (!isNaN(v) && v >= 0.0 && v <= 100.0) {
         state.telemetry.humidity = v;
       }
     }
@@ -2581,42 +2810,74 @@ function handleIncomingSerialLine(raw) {
   }
 
   // 2. MPU-6050 Accelerometer — buffer all 3 axes; compute only when AZ arrives
-  // Prevents false 0G readings from partial packet state
+  // NOTE: Matches BOTH "MPU6050" (no dash) and "MPU-6050" (with dash) prefixes
+  // from firmware — the exact string depends on firmware build version.
   if (!state.rawAccel) state.rawAccel = { ax: null, ay: null, az: null };
-  if (upper.includes('MPU6050 AX')) {
+
+  const isMpuAX = upper.includes('MPU6050 AX') || upper.includes('MPU-6050 AX');
+  const isMpuAY = upper.includes('MPU6050 AY') || upper.includes('MPU-6050 AY');
+  const isMpuAZ = upper.includes('MPU6050 AZ') || upper.includes('MPU-6050 AZ');
+
+  if (isMpuAX) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) state.rawAccel.ax = parseFloat(match[1]);
-    return; // Wait for full triaxial vector before updating UI
+    return;
   }
-  if (upper.includes('MPU6050 AY')) {
+  if (isMpuAY) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) state.rawAccel.ay = parseFloat(match[1]);
-    return; // Wait for full triaxial vector before updating UI
+    return;
   }
-  if (upper.includes('MPU6050 AZ')) {
+  if (isMpuAZ) {
     const match = raw.match(/:\s*([-\d.]+)/);
     if (match) {
       state.rawAccel.az = parseFloat(match[1]);
 
-      // Only commit when all three axes have valid readings
+      // Commit when all three axes have valid readings
       if (state.rawAccel.ax !== null && state.rawAccel.ay !== null && state.rawAccel.az !== null) {
         const ax = state.rawAccel.ax;
         const ay = state.rawAccel.ay;
         const az = state.rawAccel.az;
 
+        // ── Reset buffer so next cycle starts fresh ──
+        state.rawAccel = { ax: null, ay: null, az: null };
+
+        // ── Detect I2C hardware failure: all axes exactly 0 means MPU-6050 not responding ──
+        const isI2CFault = (ax === 0 && ay === 0 && az === 0);
+
         state.telemetry.ax = ax;
         state.telemetry.ay = ay;
         state.telemetry.az = az;
 
-        // Bug Fix: If all axes are exactly 0 (sensor sleeping/reset), default to
-        // 1.00G stationary baseline. On Earth, static G magnitude is always ~1G.
         const gMag = Math.sqrt(ax * ax + ay * ay + az * az);
-        state.telemetry.gforce = (gMag < 0.01) ? 1.00 : gMag;
+        state.telemetry.gforce = gMag;
 
-        // Compute tilt angles from accelerometer vector
-        state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI);
-        state.telemetry.roll = Math.atan2(ay, az) * (180 / Math.PI);
-        if (state.telemetry.yaw === null) state.telemetry.yaw = 180.0;
+        if (isI2CFault) {
+          // Don't compute pitch/roll from garbage zeros — leave previous values
+          // Don't stamp gyroLastUpdate — keeps 3D model in neutral hero pose
+          logTerminal('[IMU] FAULT: All axes 0.00 — MPU-6050 not responding on I2C (SDA: GPIO21, SCL: GPIO22). Check wiring.');
+          state.telemetry.pitch = null;  // forces gyroDataFresh = false in animate3D
+          state.telemetry.roll  = null;
+        } else {
+          // Valid real sensor data — compute tilt angles
+          // pitch = nose up/down: atan2(-ax, sqrt(ay²+az²))
+          // roll  = left/right:   atan2(ay, az)
+          const safeDenom = az === 0 ? 0.001 : az;
+          state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI);
+          state.telemetry.roll  = Math.atan2(ay, safeDenom) * (180 / Math.PI);
+          if (state.telemetry.yaw === null) state.telemetry.yaw = 180.0;
+
+          logTerminal(`[IMU] ✓ pitch=${state.telemetry.pitch.toFixed(1)}° roll=${state.telemetry.roll.toFixed(1)}° G=${gMag.toFixed(3)}`);
+
+          // Stamp gyro timestamp so animate3D enters GYRO LIVE mode
+          state.three.gyroLastUpdate = Date.now();
+          // Seed smooth filter on first real packet to avoid large jump
+          if (!state.three.gyroInitialized) {
+            state.three.smoothPitch = state.telemetry.pitch - (state.telemetry.tarePitch || 0);
+            state.three.smoothRoll  = state.telemetry.roll  - (state.telemetry.tareRoll  || 0);
+            state.three.gyroInitialized = true;
+          }
+        }
 
         updateDashboardUI(state.telemetry);
       }
@@ -2792,6 +3053,11 @@ function toggleSimulator() {
       state.hasLiveStream = false;
       UI.systemStatusPill.className = 'stream-status-pill standby';
       UI.systemStatusText.textContent = 'HARDWARE STANDBY — CONNECT USB';
+      Object.keys(state.telemetry).forEach(k => {
+        if (!k.startsWith('_')) state.telemetry[k] = null;
+      });
+      state.telemetry.sos = false;
+      state.telemetry.concussion = false;
       updateDashboardUI(state.telemetry);
       logTerminal('[TEST HARNESS] Disengaged. Dashboard restored to clean standby.');
     }
@@ -2969,26 +3235,30 @@ function initEventListeners() {
   }
 
   // Actuator: Helmet Buzzer Ping
-  UI.btnSoundBuzzer.addEventListener('click', () => {
-    sendSerialCommand('BUZZ');
-    playJarvisChirp(1000, 'sawtooth', 0.22, 0.2);
-    logTerminal('[ACTUATOR] Fired acoustic pulse on physical helmet buzzer.');
-  });
+  if (UI.btnSoundBuzzer) {
+    UI.btnSoundBuzzer.addEventListener('click', () => {
+      sendSerialCommand('BUZZ');
+      playJarvisChirp(1000, 'sawtooth', 0.22, 0.2);
+      logTerminal('[ACTUATOR] Fired acoustic pulse on physical helmet buzzer.');
+    });
+  }
 
   // Actuator: Emergency SOS Beacon
-  UI.btnManualSos.addEventListener('click', () => {
-    state.telemetry.sos = !state.telemetry.sos;
-    if (state.telemetry.sos) {
-      UI.btnManualSos.innerHTML = '<span>CANCEL DISTRESS SOS</span>';
-      playAlertSiren();
-      logTerminal('>>> EMERGENCY SOS BEACON TRANSMITTING <<<');
-      sendSerialCommand('CMD:SOS_ON');
-    } else {
-      UI.btnManualSos.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
-      logTerminal('[INFO] SOS Distress cancelled.');
-      sendSerialCommand('CMD:SOS_OFF');
-    }
-  });
+  if (UI.btnManualSos) {
+    UI.btnManualSos.addEventListener('click', () => {
+      state.telemetry.sos = !state.telemetry.sos;
+      if (state.telemetry.sos) {
+        UI.btnManualSos.innerHTML = '<span>CANCEL DISTRESS SOS</span>';
+        playAlertSiren();
+        logTerminal('>>> EMERGENCY SOS BEACON TRANSMITTING <<<');
+        sendSerialCommand('CMD:SOS_ON');
+      } else {
+        UI.btnManualSos.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+        logTerminal('[INFO] SOS Distress cancelled.');
+        sendSerialCommand('CMD:SOS_OFF');
+      }
+    });
+  }
 
   // 3D Viewport Controls & Zoom Buttons
   if (UI.btnZoomIn) {

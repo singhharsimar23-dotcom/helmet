@@ -1,16 +1,14 @@
 {
-  "version": 2,
-  "name": "soldier-helmet",
-  "builds": [
+  "framework": null,
+  "headers": [
     {
-      "src": "index.html",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
     }
   ]
 }

@@ -5,12 +5,12 @@
  * PIN CONFIGURATION:
  *  1. I2C (SDA: GPIO 21, SCL: GPIO 22): MPU-6050 [0x68], MAX30102 [0x57]
  *  2. DHT22: GPIO 4 (bit-bang, no library)
- *  3. Gas: MQ-135 GPIO 34 (ADC1), MQ-7 GPIO 35 (ADC1)
- *  4. IR Obstacle Sensor: GPIO 18 (active-LOW when object detected, INPUT_PULLUP)
+ *  3. Gas: MQ-135 GPIO 34 (ADC1), MQ-7 SVP / GPIO 36 (ADC1)
+ *  4. IR Obstacle Sensor: GPIO 27 (active-LOW when object detected, INPUT_PULLUP)
  *  5. HC-SR04 Ultrasonic: TRIG GPIO 5, ECHO GPIO 18 (IR sensor used instead)
  *  6. GPS: NEO-6M UART2 RX=16, TX=17 @ 9600 Baud
  *  7. Buzzer: GPIO 23 (active-HIGH)
- *  8. SOS Button: GPIO 19 (active-LOW, INPUT_PULLUP)
+ *  8. SOS Button: GPIO 25 (active-LOW, INPUT_PULLUP)
  * ========================================================================================= */
 
 #include <Wire.h>
@@ -22,10 +22,10 @@
 #define PIN_I2C_SCL         22
 #define PIN_DHT             4
 #define PIN_GAS_ANALOG      34
-#define PIN_CO_ANALOG       35
-#define PIN_IR_SENSOR       18   // Digital IR obstacle sensor (active-LOW)
+#define PIN_CO_ANALOG       36   // SVP (Sensor_VP, ADC1_CH0)
+#define PIN_IR_SENSOR       27   // Digital IR obstacle sensor (active-LOW)
 #define PIN_TRIG            5    // HC-SR04 trig (not used if IR sensor on 18)
-#define PIN_SOS_BTN         19
+#define PIN_SOS_BTN         25
 #define PIN_BUZZER          23
 #define GPS_RX_PIN          16
 #define GPS_TX_PIN          17
@@ -56,6 +56,8 @@ bool buzzerState       = false;
 bool   obstacleDetected    = false;
 float  currentDistCm       = -1.0f;
 unsigned long lastObstacleBuzzMs = 0;
+int    irPin               = 27;
+int    irActive            = LOW;
 
 // Complementary filter (MPU-6050)
 float compPitch            = 0.0f;
@@ -122,10 +124,8 @@ void setup() {
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
   pinMode(0, INPUT_PULLUP);
 
-  // IR Obstacle Sensor — check GPIO 18, 5, and 14 with pullup
+  // IR Obstacle Sensor — GPIO 27 (active-LOW).
   pinMode(PIN_IR_SENSOR, INPUT_PULLUP);
-  pinMode(PIN_TRIG, INPUT_PULLUP);
-  pinMode(14, INPUT_PULLUP);
 
   // I2C
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -225,13 +225,10 @@ void readIRObstacleSensor() {
   if (now - lastProxMs < 40) return;
   lastProxMs = now;
 
-  // FC-51 / TCRT5000: OUT pin = LOW when obstacle, HIGH when clear
-  // Check GPIO 18 (ECHO), GPIO 5 (TRIG), and GPIO 14
-  int irRaw18 = digitalRead(PIN_IR_SENSOR);
-  int irRaw5  = digitalRead(PIN_TRIG);
-  int irRaw14 = digitalRead(14);
+  // FC-51 / TCRT5000: runtime-configurable pin and active level
+  int irRaw = digitalRead(irPin);
   bool prevObstacle = obstacleDetected;
-  obstacleDetected = (irRaw18 == LOW || irRaw5 == LOW || irRaw14 == LOW);
+  obstacleDetected = (irRaw == irActive);
 
   if (obstacleDetected) {
     currentDistCm = 10.0f;
@@ -503,20 +500,21 @@ void readAndTransmitTelemetry() {
 // SOS BUTTON (debounced toggle)
 // ============================================================================
 void checkSosButton() {
+  // Latch-ON only — contact bounce on release cannot toggle back to false.
+  // SOS can only be cleared by CMD:SOS_OFF from the dashboard.
+  if (isDistressActive) return;  // Already latched; ignore further presses
+
   bool btn = (digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW);
   if (btn) {
-    delay(50);
+    delay(80);  // 80 ms debounce settle window
     btn = (digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW);
     if (btn) {
-      isDistressActive = !isDistressActive;
-      setBuzzer(isDistressActive);
-      if (isDistressActive) {
-        Serial.println("[SOS] DISTRESS BUTTON PRESSED — BEACON ACTIVE");
-        chirpBuzzer(3, 100, 60);
-      } else {
-        Serial.println("[SOS] DISTRESS CLEARED");
-      }
-      while ((digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW)) delay(15);
+      isDistressActive = true;  // Latch ON — cleared only via CMD:SOS_OFF
+      setBuzzer(true);
+      Serial.println("[SOS] DISTRESS BUTTON PRESSED — BEACON ACTIVE");
+      chirpBuzzer(3, 100, 60);
+      // Wait for physical release so we don't re-enter on the same press
+      while ((digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW)) delay(20);
     }
   }
 }
@@ -556,7 +554,7 @@ void handleIncomingCommands() {
     Serial.print("[STATUS] MPU:"); Serial.print(mpuFound?"OK":"ABSENT");
     Serial.print(" | DHT22:"); Serial.print(dhtValid?"OK":"FALLBACK");
     Serial.print(" T="); Serial.print(dhtTemp,1); Serial.print("C H="); Serial.print(dhtHum,1); Serial.print("%");
-    Serial.print(" | IR(GPIO18)="); Serial.print(digitalRead(PIN_IR_SENSOR)==LOW?"OBSTACLE":"CLEAR");
+    Serial.print(" | IR(GPIO27)="); Serial.print(digitalRead(irPin)==irActive?"OBSTACLE":"CLEAR");
     Serial.print(" | MQ135="); Serial.print(analogRead(PIN_GAS_ANALOG));
     Serial.print(" | MQ7="); Serial.print(analogRead(PIN_CO_ANALOG));
     Serial.print(" | GPS="); Serial.print(gpsHardwareAlive?(gpsHasFix?"3D_FIX":"SEARCHING"):"NO_UART");
@@ -570,13 +568,53 @@ void handleIncomingCommands() {
     Serial.print("[3] DHT22 (GPIO4):   "); 
     if (dhtValid) { Serial.print("OK — T="); Serial.print(dhtTemp,1); Serial.print("C H="); Serial.print(dhtHum,1); Serial.println("%"); }
     else Serial.println("NO RESPONSE — using fallback 27.5C/54%");
-    Serial.print("[4] IR Sensor (GPIO18): "); Serial.println(digitalRead(PIN_IR_SENSOR)==LOW?"OBSTACLE":"CLEAR");
+    Serial.print("[4] IR Sensor (GPIO27): "); Serial.println(digitalRead(irPin)==irActive?"OBSTACLE":"CLEAR");
     Serial.print("[5] MQ-135 (GPIO34): ADC="); Serial.println(analogRead(PIN_GAS_ANALOG));
-    Serial.print("[6] MQ-7   (GPIO35): ADC="); Serial.println(analogRead(PIN_CO_ANALOG));
+    Serial.print("[6] MQ-7   (SVP/GPIO36): ADC="); Serial.println(analogRead(PIN_CO_ANALOG));
     Serial.print("[7] GPS:             "); Serial.println(gpsHardwareAlive?"UART2 ACTIVE":"NO NMEA ON GPIO16");
-    Serial.print("[8] SOS Button:      "); Serial.println(digitalRead(PIN_SOS_BTN)==LOW?"PRESSED":"OK (not pressed)");
+    Serial.print("[8] SOS Button (GPIO25): "); Serial.println((digitalRead(PIN_SOS_BTN)==LOW||digitalRead(0)==LOW)?"PRESSED":"OK (not pressed)");
     Serial.println("==================================================\n");
   } else if (cmd == "GPS") {
     Serial.print("[GPS] "); Serial.println(gpsHardwareAlive?"UART2 STREAMING":"OFFLINE");
+  } else if (cmd == "IRSCAN") {
+    const int scanPins[] = {5, 13, 14, 15, 18, 25, 26, 27, 32, 33};
+    for (int p : scanPins) {
+      pinMode(p, INPUT_PULLUP);
+    }
+    delay(5);
+    Serial.print("[IRSCAN]");
+    for (int p : scanPins) {
+      Serial.print(" G");
+      Serial.print(p);
+      Serial.print("=");
+      Serial.print(digitalRead(p));
+    }
+    Serial.println();
+  } else if (cmd.startsWith("IRPIN ") || cmd == "IRPIN") {
+    String arg = cmd.substring(5);
+    arg.trim();
+    int requestedPin = (arg.length() > 0) ? arg.toInt() : -1;
+    const int reservedPins[] = {4, 16, 17, 19, 21, 22, 23, 25, 27, 34, 35, 0};
+    bool isReserved = false;
+    for (int rp : reservedPins) {
+      if (requestedPin == rp) {
+        isReserved = true;
+        break;
+      }
+    }
+    if (isReserved || requestedPin < 0) {
+      Serial.println("[ERR] pin reserved");
+    } else {
+      irPin = requestedPin;
+      pinMode(irPin, INPUT_PULLUP);
+      Serial.print("[ACK] IR pin = GPIO ");
+      Serial.println(irPin);
+    }
+  } else if (cmd == "IRPOL HIGH") {
+    irActive = HIGH;
+    Serial.println("[ACK] IR active-HIGH");
+  } else if (cmd == "IRPOL LOW") {
+    irActive = LOW;
+    Serial.println("[ACK] IR active-LOW");
   }
 }

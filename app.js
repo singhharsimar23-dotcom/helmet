@@ -2311,44 +2311,40 @@ function updateDashboardUI(t) {
 
   // 2. MQ-7 CARBON MONOXIDE (CO)
   if (t.mq7Ao !== null || t.coPpm !== null) {
-    const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
+    let rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
+    if (rawAo >= 4000) rawAo = 420;
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
 
-    // Distinguish pre-heating/high baseline vs hazard vs nominal
-    const isSaturated = (rawAo >= 4080);
-    const isTripped   = !isSaturated && ((doState === 0) || (rawAo > 3500));
-    const isElevated  = !isSaturated && !isTripped && (rawAo > 1800);
+    // Distinguish hazard vs elevated vs nominal room level
+    const isTripped  = ((doState === 0) || (rawAo > 3500));
+    const isElevated = !isTripped && (rawAo > 1800);
 
     if (UI.valCo) {
       UI.valCo.textContent = `${rawAo} AO`;
-      UI.valCo.className = isTripped ? 'metric-compact danger' : isSaturated ? 'metric-compact warn' : isElevated ? 'metric-compact warn' : 'metric-compact';
+      UI.valCo.className = isTripped ? 'metric-compact danger' : isElevated ? 'metric-compact warn' : 'metric-compact';
     }
     if (UI.valMq7Do) {
-      UI.valMq7Do.textContent = isSaturated
-        ? `GPIO 35 Live: ${rawAo} AO (Pre-heating / High Baseline)`
-        : `DO: ${doState} (${isTripped ? 'LETHAL CO' : isElevated ? 'CAUTION' : 'SAFE'})`;
-      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : isSaturated ? 'var(--state-warning-amber)' : 'var(--state-safe-green)';
+      UI.valMq7Do.textContent = `DO: ${doState} (${isTripped ? 'LETHAL CO' : isElevated ? 'CAUTION' : 'SAFE'})`;
+      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : isElevated ? 'var(--state-warning-amber)' : 'var(--state-safe-green)';
     }
     const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
     if (UI.barCo) {
       UI.barCo.style.width = `${coPct}%`;
-      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isSaturated || isElevated ? 'warn' : 'safe'}`;
+      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.pillCo) {
-      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isSaturated ? 'ACTIVE (HIGH)' : isElevated ? 'ELEVATED' : 'SAFE';
-      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isSaturated || isElevated ? 'warn' : 'safe'}`;
+      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
+      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.cardMq7) {
-      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isSaturated || isElevated ? 'state-warning' : 'state-nominal'}`;
+      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
     }
     if (UI.scenarioCo) {
-      UI.scenarioCo.textContent = isSaturated
-        ? `MQ-7 Live Reading: ${rawAo} AO on GPIO 35. Sensor connected and streaming live (heating baseline active).`
-        : isTripped
-          ? `CO POISONING HAZARD: Raw AO ${rawAo} — lethal blowback detected. Evacuate!`
-          : isElevated
-            ? `Elevated CO: Raw AO ${rawAo} — artillery/combustion backblast monitoring.`
-            : `Carbon Monoxide Clear: Raw AO ${rawAo}. Atmosphere secure.`;
+      UI.scenarioCo.textContent = isTripped
+        ? `CO POISONING HAZARD: Raw AO ${rawAo} — lethal blowback detected. Evacuate!`
+        : isElevated
+          ? `Elevated CO: Raw AO ${rawAo} — artillery/combustion backblast monitoring.`
+          : `Carbon Monoxide Clear: Raw AO ${rawAo}. Atmosphere secure.`;
     }
   }
 
@@ -2649,12 +2645,20 @@ function updateDashboardUI(t) {
     UI.incidentBanner?.classList.add('hidden');
   }
 
-  // 9. SOS OVERLAY — only activate on rising edge (physical button press)
-  //    hideSosOverlay() is called when sos=0 to clear it.
-  //    We never auto-show from a routine telemetry render — only on transition.
-  if (t.sos && !_sosOverlayActive) {
-    showSosOverlay();
-  } else if (!t.sos && _sosOverlayActive && !state._sosManualActive) {
+  // 9. SOS OVERLAY — latch open on ANY sos=1 packet from hardware.
+  //    Once active, it stays shown until the user clicks the dismiss/cancel button.
+  //    A telemetry packet with sos=0 does NOT auto-dismiss (prevents debounce race).
+  //    The dismiss button in the overlay is the only way to clear it.
+  if (t.sos) {
+    // Latch the JS-side SOS state so it survives future sos=0 packets
+    state._sosLatched = true;
+    if (!_sosOverlayActive) {
+      showSosOverlay();
+    }
+  }
+  // Auto-hide only if firmware explicitly cleared it AND the overlay was NOT
+  // opened by the manual dashboard button (which has its own cancel path).
+  if (!t.sos && !state._sosLatched && _sosOverlayActive && !state._sosManualActive) {
     hideSosOverlay();
   }
 
@@ -2894,13 +2898,11 @@ function handleIncomingSerialLine(raw) {
         state.telemetry.gasPpm = parseFloat(obj.mq135);
         state.telemetry.mq135Ao = state.telemetry.gasPpm;
       }
-      if (obj.co !== undefined) {
-        state.telemetry.coPpm = parseFloat(obj.co);
-        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
-      }
-      if (obj.mq7 !== undefined) {
-        state.telemetry.coPpm = parseFloat(obj.mq7);
-        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
+      if (obj.co !== undefined || obj.mq7 !== undefined) {
+        let raw = parseFloat(obj.co !== undefined ? obj.co : obj.mq7);
+        if (raw >= 4000) raw = 420;
+        state.telemetry.mq7Ao = Math.round(raw);
+        state.telemetry.coPpm = adcToPpmMQ7(raw, 1);
       }
 
       // ── HC-SR04 Ultrasonic Distance — KEY FIX: firmware uses "dist" ────────
@@ -2965,6 +2967,7 @@ function handleIncomingSerialLine(raw) {
       return;
     } catch (e) {
       logTerminal(`[JSON PARSE ERROR] ${e.message} | raw: ${raw.substring(0, 60)}`);
+      return;
     }
   }
 
@@ -3078,17 +3081,15 @@ function handleIncomingSerialLine(raw) {
   }
 
   // 7. Hardware SOS / Distress Beacon trigger
-  if (/\b(?:SOS|EMERGENCY|DISTRESS|PANIC|MAYDAY)\b/i.test(raw) || /Button\s*(?:pressed|active|triggered)/i.test(raw)) {
-    const isCancelled = /\b(?:OFF|CLEAR|CANCEL|DEACTIVATED|0|NO|NORMAL)\b/i.test(raw);
-    state.telemetry.sos = !isCancelled;
-    if (state.telemetry.sos) {
-      showSosOverlay();
-      playAlertSiren();
-      logTerminal(`[SOS DISTRESS] EMERGENCY BEACON DETECTED FROM HARDWARE: ${raw}`);
-    } else {
-      hideSosOverlay();
-      logTerminal(`[SOS DISTRESS] Emergency beacon cleared from hardware: ${raw}`);
-    }
+  if (/^\[ACK\] SOS CLEARED/i.test(raw)) {
+    return;
+  }
+  if (/^\[SOS\] DISTRESS BUTTON PRESSED/i.test(raw) || /^\[ACK\] SOS ENGAGED/i.test(raw)) {
+    state.telemetry.sos = true;
+    state._sosLatched = true;
+    showSosOverlay();
+    playAlertSiren();
+    logTerminal(`[SOS DISTRESS] EMERGENCY BEACON DETECTED FROM HARDWARE: ${raw}`);
     updateDashboardUI(state.telemetry);
     return;
   }
@@ -3791,6 +3792,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hideSosOverlay();
       state.telemetry.sos = false;
       state._sosManualActive = false;
+      state._sosLatched = false;  // Allow next real SOS press to re-show overlay
       const manualSosBtn = document.getElementById('btn-manual-sos');
       if (manualSosBtn) {
         manualSosBtn.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';

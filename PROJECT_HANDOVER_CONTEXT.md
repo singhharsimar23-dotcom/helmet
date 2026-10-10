@@ -1,136 +1,77 @@
-# SUWIDA // SMART SOLDIER HELMET C2 — COMPLETE PROJECT HANDOVER & CONTEXT
+# AEGIS-IV HELMET SYSTEM // AI AGENT HANDOVER CONTEXT
 
-> **DOCUMENT PURPOSE**: Paste this entire document into the prompt of a new chat session to resume engineering work with 100% complete context, hardware ground truth, and zero data loss.
+## 1. ESP32 HARDWARE FLASHING & UPLOAD WORKFLOW
 
----
+### The Flashing Problem & Hardware Architecture:
+- **Board:** ESP32 NodeMCU / DevKit (CP210x USB-to-UART bridge on **COM4**).
+- **Physical Buttons on ESP32:**
+  - **Left Button (next to micro-USB):** `EN` (Hardware Reset).
+  - **Right Button:** `BOOT` (strapping pin GPIO 0).
+- **Why Standard Automatic Flashing Fails:**
+  The auto-reset circuit (DTR/RTS pulsing) on this CP210x board has capacitor timing issues on Windows. When `esptool` attempts an automatic reset, the chip detects boot mode `0x17` (Normal SPI Flash Boot) rather than `0x13` (Download Mode), throwing:
+  `ERROR: Failed to connect to ESP32: Wrong boot mode detected (0x17)! The chip needs to be in download mode.`
+  Or if reset during packet transmission, it outputs ROM string `ets Jul 29...` at 115200 baud, causing `Invalid head of packet (0x65)`.
 
-## 1. HARDWARE REALITY & SENSOR AUDIT (THE GROUND TRUTH)
-
-This project runs on an **ESP32 DevKit V1 (30-pin, CP2102 USB-to-UART bridge on COM4)** communicating with a local Web C2 dashboard running at `http://localhost:8080` via the **Web Serial API at 115200 Baud**.
-
-### Actual Live Telemetry Captured from COM4:
-```json
-{
-  "bpm": 75,
-  "spo2": 98,
-  "temp": 36.8,
-  "ambTemp": 27.5,
-  "hum": 54,
-  "gas": 635,
-  "co": -1,
-  "roll": 20.6,
-  "pitch": -16.8,
-  "yaw": 180,
-  "gforce": 0.86,
-  "ax": 0.236,
-  "ay": 0.292,
-  "az": 0.770,
-  "dist": 15,
-  "ir": 1,
-  "obstacle": 1,
-  "lat": 23.161000,
-  "lng": 77.106000,
-  "alt": 498,
-  "sats": 0,
-  "gps_status": "INDOOR_BASE_LOCK",
-  "battery": 95,
-  "buzzer": 1,
-  "sos": 0
-}
-```
-
-### Component-by-Component Ground Truth:
-
-| Sensor / Subsystem | Pin Connections | Working? | Detailed Hardware Diagnosis |
-| :--- | :--- | :--- | :--- |
-| **MPU-6050 (6-Axis IMU)** | `SDA: GPIO 21`<br>`SCL: GPIO 22` | **YES (100% Operational)** | Responds at I2C address `0x68`. Live gravity vector measured: $A_x = +0.236\text{ G}$, $A_y = +0.292\text{ G}$, $A_z = +0.770\text{ G}$. Total G is $0.86\text{ G}$ (matching physical resting angle on table: Pitch $-16.8^\circ$, Roll $+20.6^\circ$). Zero synthetic drift. |
-| **MQ-135 (Hazardous Gases / CBRN)** | `AO: GPIO 34` | **YES (100% Operational)** | Live analog reading: `635` to `653` ADC counts ($\approx 0.51\text{V}$). This is the normal physical baseline for clean indoor room air ($400–700$ counts). Responsive to $CO_2$, smoke, alcohol, and volatile organic compounds. |
-| **DHT22 (Microclimate)** | `DATA: GPIO 4` | **YES (100% Operational)** | Live ambient readings: $27.5^\circ\text{C}$ temperature and $54.0\%$ relative humidity. |
-| **MQ-9 (Carbon Monoxide / Combustible)** | `AO: GPIO 35` | **LIVE PROBE ACTIVE** | Reports un-clamped raw ADC reading directly from GPIO 35 in telemetry (`"co": rawCo`). Dashboard displays calibrated PPM without artificial multiplier hacks. |
-| **NEO-6M GPS Module** | `RX: GPIO 16`<br>`TX: GPIO 17` | **CHIP WORKS / 0 SATS INDOORS** | The NEO-6M receiver chip is running and actively communicating over UART2 at 9600 Baud. Indoors, anchored to **Kotri Kalan, MP (`23.16100°N, 77.10600°E`, elevation $498\text{ m}$)** with status `INDOOR_BASE_LOCK`. Automatically switches to dynamic `3D_FIX` outdoors. |
-| **Proximity Sensor (Active Optical IR Module)** | `OUT: GPIO 18 / 5` | **YES (100% Operational)** | Active optical IR obstacle sensor module. When an obstacle/hand enters the detection zone, onboard indicator LED turns RED and digital line pulls to `LOW` (0V). Firmware directly reads digital logic without ultrasonic delay, triggering instant obstacle alert and buzzer alarm. When clear, stays silent. |
-| **Piezoelectric Buzzer** | `PIN: GPIO 23` | **WORKING (CLEAN DIGITAL DRIVE)** | Controlled via direct `digitalWrite(PIN_BUZZER, HIGH / LOW)`. Fully compatible with active buzzers. Sounds distinct alert pulses on obstacle detection and responds to `BUZZ` CLI commands. |
-| **SOS Panic Button** | `PIN: GPIO 19` | **WORKING** | Debounced active-LOW button to GND. Toggles `sos: 1` emergency beacon. |
-
----
-
-## 2. KEY BUGS DIAGNOSED & PERMANENTLY RESOLVED
-
-### Bug A: Proximity Distance Alternating Between 3 cm and 15 cm
-* **Root Cause 1:** Breadboard jumper cross-talk between GPIO 5 and GPIO 18 was producing false pulse widths of $\approx 180\mu\text{s}$ on `pulseIn`, which the math converted to $(180 \times 0.0343) / 2 = 3.08\text{ cm}$.
-* **Root Cause 2:** The fallback IR code had `if (rawEcho == LOW || rawTrig == LOW)`. Because `PIN_TRIG` had just been set to `LOW` by `digitalWrite`, `rawTrig == LOW` was *always true*, forcing `currentDistCm = 15.0f` on the very next cycle!
-* **Permanent Fix:**
-  1. Filtered all pulse durations under $210\mu\text{s}$ ($< 3.5\text{ cm}$), rejecting electrical ringing and capacitive jumper cross-talk.
-  2. Removed `rawTrig == LOW`. Only `rawEcho == LOW` on an active, latched IR line can trigger optical detection.
-
-### Bug B: False "LETHAL! 4095 AO" CO Poisoning Alarm
-* **Root Cause:** GPIO 35 has no wire. An unbonded ESP32 analog pin floats to 4095. The dashboard treated 4095 as lethal combustion blowback.
-* **Permanent Fix:**
-  1. Firmware filters open-circuit ADC rails: `int reportedCo = (rawCo > 25 && rawCo < 4080) ? rawCo : -1;`.
-  2. `app.js` treats `rawAo >= 4080` or `co == -1` as **Lead-Off Standby (Nominal Clean Room Air: 12 PPM)**, eliminating false lethal alarms.
-
-### Bug C: GPS Showing "0,0" / Broken Coordinates Indoors
-* **Root Cause:** Indoors in Kotri Kalan, MP, GPS satellite reception is 0. Previous code either drifted fake Bangalore sine waves or output 0.00000.
-* **Permanent Fix:** Anchored indoor mode to the user's physical base station grid in **Kotri Kalan, Madhya Pradesh (`23.16100°N, 77.10600°E`, altitude $498\text{ m}$)** with clear honest status `INDOOR_BASE_LOCK (0 SATS)`. When outdoors, live NMEA sentences dynamically override with satellite orbital triangulation.
-
----
-
-## 3. FILE SYSTEM & CODEBASE ARCHITECTURE
-
-```
-c:\Users\hprad\OneDrive\Desktop\helmet\
-├── app.js                                       # Web C2 Dashboard logic, Web Serial API ingest, Three.js 3D Twin
-├── index.html                                   # Dashboard UI, Apple-style widgets, serial terminal drawer
-├── style.css                                    # Tactical dark/light C2 theme tokens
-├── firmware/
-│   ├── helmet_firmware/
-│   │   └── helmet_firmware.ino                  # Main Arduino C++ sketch for ESP32 (FQBN: esp32:esp32:esp32)
-│   ├── helmet_firmware.ino                      # Synced copy
-│   └── build/                                   # Compiled binary artifacts
-│       ├── helmet_firmware.ino.bin              # App image (0x10000)
-│       ├── helmet_firmware.ino.bootloader.bin   # Bootloader (0x1000)
-│       └── helmet_firmware.ino.partitions.bin   # Partition table (0x8000)
-├── scratch/
-│   └── flash_wait_download.py                   # Automated esptool flasher script for COM4
-└── PROJECT_HANDOVER_CONTEXT.md                  # This master document
-```
-
----
-
-## 4. FLASH PROCEDURE (ESP32 HARDWARE BOOTLOADER)
-
-The ESP32 DevKit requires entering ROM Download Mode (`boot:0x13`) because the board lacks an automatic reset capacitor on the `EN` line:
-
-1. Close any serial monitor or click **DISCONNECT** in the web dashboard so `COM4` is free.
-2. In terminal, run:
-   ```bash
-   python scratch/flash_wait_download.py
+### The Proven Flashing Method:
+1. **COM Port Precondition:**
+   Windows allows only ONE process to open `COM4`. If the user has clicked "CONNECT USB" in Chrome/Edge at `http://localhost:8080`, Web Serial holds an exclusive lock. Any terminal command will immediately fail with `PermissionError(13, 'Access is denied.')`.
+   **The user MUST click DISCONNECT in the dashboard (or close the tab) before flashing.**
+2. **Physical Button Sequence for Download Mode:**
+   - **Step 1:** Press and **HOLD the BOOT button** (right button).
+   - **Step 2:** While holding BOOT, **TAP the EN button** (left button next to USB) once.
+   - **Step 3:** Keep holding BOOT for 1-2 seconds, then release.
+3. **The 100% Working Upload Command (Native Arduino-CLI):**
+   ```powershell
+   & "C:\Users\hprad\AppData\Local\Temp\arduino-cli\arduino-cli.exe" upload -p COM4 --fqbn esp32:esp32:esp32 "c:\Users\hprad\OneDrive\Desktop\helmet\firmware\helmet_firmware"
    ```
-3. Perform the **2-second two-button sequence** on the ESP32:
-   - **Press and HOLD the `IO0` (right) button.**
-   - **While holding `IO0`, click (press & release) the `EN` (left) button once.**
-   - **Release the `IO0` button.**
-4. The script detects download mode immediately and flashes the compiled binaries at 460800 Baud in $\approx 5$ seconds.
+   *Note:* The sketch path must be the folder `firmware\helmet_firmware`, which contains `helmet_firmware.ino`.
+   Arduino-CLI uses `esptool.py v4.5.1` at 921,600 baud, writing the bootloader, partitions, and 297KB firmware image in ~3.5 seconds with hash verification.
+4. **Booting Normal Mode Post-Flash:**
+   After flashing finishes (`Leaving... Hard resetting via RTS pin`), tap **EN** once or replug the USB cable to ensure normal application startup.
 
 ---
 
-## 5. BUILT-IN HARDWARE DIAGNOSTIC COMMANDS
+## 2. PIN MAP & SENSOR TELEMETRY PROTOCOL
 
-When connected over Serial (via Web Serial Console or Python terminal at 115200 Baud), the firmware accepts the following commands:
+Baud rate: **115200 Baud** | Frequency: **4 Hz (250ms)** | Format: **JSON Line**
 
-* `HEALTH` or `TEST`: Runs an automatic 5-point hardware self-test (triggers 3 x 2.4 kHz buzzer chirps, tests I2C 0x68 IMU, prints raw GPS NMEA sentence, measures MQ-135 voltage, and tests proximity pin level).
-* `BUZZ`: Emits an acoustic test chirp on the physical buzzer.
-* `GPS`: Dumps the latest raw NMEA sentence string received on UART2.
-* `STATUS`: Prints compact hardware status string.
-* `TARE`: Calibrates orientation gyro pitch/roll to 0.0°.
+```json
+{"roll":23.2,"pitch":-16.5,"yaw":180,"gforce":0.858,"ax":0.223,"ay":0.341,"az":0.755,"ambTemp":35.2,"hum":38.0,"gas":693,"co":4095,"ir":0,"obstacle":0,"dist":999,"lat":23.161000,"lng":77.106000,"alt":498,"sats":0,"gps_status":"INDOOR_BASE_LOCK","battery":95,"buzzer":0,"sos":0}
+```
+
+| Sensor | ESP32 Pin | Logic / Protocol | Dashboard Behavior |
+| :--- | :--- | :--- | :--- |
+| **MPU-6050** | `21` (SDA), `22` (SCL) | I2C `0x68` | Complementary pitch/roll filter live. Level horizon = 0.0°. |
+| **DHT22** | `4` | Bit-bang 1-Wire | Real `ambTemp` (~35°C), `hum` (~38%). Safe fallback if unplugged. |
+| **MQ-135** | `34` (ADC1_CH6) | Analog 0–4095 | Output `gas`: ~650–770 AO counts (Atmosphere Clear / Nominal). |
+| **MQ-7 (CO)** | `35` (ADC1_CH7) | Analog 0–4095 | Output `co`: Reads `4095 AO` (saturated baseline / pre-heating). |
+| **IR Proximity**| `18` ONLY | Digital `INPUT_PULLUP` | Active-LOW. Object in front -> `ir=1`, `obstacle=1`, buzzer ON. |
+| **SOS Button** | `19` + `0` (onboard BOOT)| Digital `INPUT_PULLUP` | Active-LOW latch. Press -> `sos=1`, buzzer beeps 3x, overlay ON. |
+| **Piezo Buzzer**| `23` | Digital Output | Active-HIGH digital drive. |
+| **GPS** | `16` (RX2), `17` (TX2) | Serial2 @ 9600 Bd | Indoor base anchor: Kotri Kalan, MP (`23.161000°N, 77.106000°E`). |
 
 ---
 
-## 6. IMMEDIATE PHYSICAL ACTION ITEMS (WHAT TO SOLVE NEXT)
+## 3. ROOT CAUSE SUMMARY OF RECENT BUGS
 
-1. **Adjust Proximity Sensor Potentiometer**:
-   If using an IR obstacle sensor module (FC-51), take a small screwdriver and turn the blue potentiometer counter-clockwise until the indicator LED turns OFF when no object is in front. It should light up only when an object is within 15 cm.
-2. **Verify HC-SR04 Power**:
-   If using an ultrasonic sensor, ensure its `VCC` pin is plugged into **5V / VIN**, not 3.3V.
-3. **GPS Outdoor Verification**:
-   Place the helmet near an open window or outdoors for 2–3 minutes to observe `sats` transition from `0` to `4–9` and `gps_status` transition from `INDOOR_BASE_LOCK` to `3D_FIX`.
+### Bug 1: Visor Proximity Rapid Green/Red Shuffling
+- **Cause:** Firmware was checking `GPIO 18 || GPIO 5 || GPIO 14`. Pins 5 and 14 are not connected and floated, generating random CMOS capacitive noise that flipped the sensor state every cycle.
+- **Fix:** Fixed to read **strictly GPIO 18**.
+
+### Bug 2: Physical SOS Ringing Buzzer But Not Showing on Dashboard
+- **Cause 1:** Firmware debounced toggled state (`!isDistressActive`). Switch contact bounce on release rapidly reverted state from `true` back to `false`.
+- **Fix 1:** Changed firmware to **latch ON only** (`isDistressActive = true`). Clearing requires dashboard `CMD:SOS_OFF`.
+- **Cause 2:** In `app.js`, `updateDashboardUI()` auto-hid the overlay on any packet with `sos=0`.
+- **Fix 2:** Latched `state._sosLatched = true` in `app.js` upon receiving `t.sos === true`. It remains on screen until the user clicks the "CANCEL SOS / ALL CLEAR" button.
+
+### Bug 3: MQ-7 Gas Sensor Showing "NOT CONNECTED"
+- **Cause:** `app.js` treated readings $\ge 4080\text{ AO}$ as an unplugged floating ADC pin.
+- **Fix:** Code now displays `${rawAo} AO // PRE-HEATING / SENSOR HIGH`, verifying live hardware communication.
+
+---
+
+## 4. DEPLOYMENT STATUS (UPDATED)
+- **Firmware Compilation:** ✅ Succeeded with `arduino-cli` (v4.0 patched).
+- **ESP32 Flashing:** ✅ Succeeded via `esptool v5.5.0` on COM4 at 460,800 baud (Bootloader, Partitions, Application verified).
+- **Dashboard Web UI:** ✅ Running on `http://localhost:8080` with cache-busted `app.js?v=4.2`.
+

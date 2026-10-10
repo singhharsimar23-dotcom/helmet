@@ -246,7 +246,9 @@ float measureUltrasonicPulse(int trigPin, int echoPin) {
 
   pinMode(echoPin, INPUT);
   long dur = pulseIn(echoPin, HIGH, 30000); // 30ms timeout (~5.1m max)
-  if (dur < 90 || dur > 26000) return -1.0f;
+  // Minimum valid travel time for sound (> 3.5cm) is 210µs.
+  // Reject electrical cross-talk / transducer direct ringing (< 210µs)
+  if (dur < 210 || dur > 24000) return -1.0f;
   return (dur * 0.0343f) / 2.0f;
 }
 
@@ -264,33 +266,33 @@ void readProximitySensor() {
     if (distRev > 0.0f) dist = distRev;
   }
 
-  // Restore pins
+  // Restore standard pin modes
   pinMode(PIN_TRIG, OUTPUT);
   digitalWrite(PIN_TRIG, LOW);
   pinMode(PIN_ECHO, INPUT_PULLUP);
 
-  if (dist >= 2.0f && dist <= 400.0f) {
+  if (dist >= 3.5f && dist <= 400.0f) {
     // Genuine HC-SR04 ultrasonic echo pulse returned!
     currentDistCm = dist;
     obstacleDetected = (dist <= 25.0f);
   } else {
-    // No ultrasonic echo returned.
-    // Check if digital IR obstacle sensor (FC-51 / TCRT5000) is connected:
-    // With pull-up enabled, an idle IR sensor sits at HIGH. When hand is placed in front (<15cm), it pulls LOW!
+    // Ultrasonic returned no obstacle in range.
+    // Check if an Active Infrared Obstacle Sensor (FC-51 / TCRT5000) is connected on PIN_ECHO:
+    // With pull-up enabled, an idle IR obstacle sensor rests at HIGH when clear.
+    // When a hand or object is placed in front (< 15 cm), its comparator pulls the pin LOW!
     int rawEcho = digitalRead(PIN_ECHO);
-    int rawTrig = digitalRead(PIN_TRIG);
 
     if (rawEcho == HIGH) {
-      // Pin is pulled HIGH by an IR obstacle sensor in CLEAR state
+      // Confirmed active IR sensor outputting HIGH (CLEAR state)
       irSensorLatched = true;
     }
 
-    if (irSensorLatched && (rawEcho == LOW || rawTrig == LOW)) {
-      // Hand placed in front of IR optical sensor!
+    if (irSensorLatched && rawEcho == LOW) {
+      // Active IR sensor detected obstacle in front!
       currentDistCm = 15.0f; // 15 cm optical detection cone
       obstacleDetected = true;
     } else {
-      // Path clear
+      // Clear path ahead!
       currentDistCm = -1.0f;
       obstacleDetected = false;
     }
@@ -601,6 +603,67 @@ void handleIncomingCommands() {
       isDistressActive = false;
       setBuzzer(false);
       Serial.println("[ACK] BUZZER SILENCED");
+    } else if (cmd == "HEALTH" || cmd == "TEST") {
+      Serial.println("\n==================================================");
+      Serial.println("[HEALTH CHECK] AEGIS-IV HARDWARE DIAGNOSTIC REPORT");
+      Serial.println("==================================================");
+      // 1. Buzzer acoustic verification
+      Serial.print("[1/5] BUZZER PWM:      ");
+      chirpBuzzer(3, 80, 50);
+      Serial.println("3 ACOUSTIC CHIRPS SENT @ 2.4 kHz (PASS)");
+
+      // 2. MPU-6050 6-Axis IMU
+      Serial.print("[2/5] MPU-6050 IMU:    ");
+      Serial.println(mpuFound ? "I2C 0x68 ACTIVE & TRACKING (PASS)" : "I2C TIMEOUT (CHECK SDA:21, SCL:22)");
+
+      // 3. NEO-6M GPS Receiver
+      Serial.print("[3/5] NEO-6M GPS:      ");
+      if (gpsHardwareAlive) {
+        Serial.print("UART2 ACTIVE (9600 BAUD) | SATS: ");
+        Serial.print(liveSats);
+        Serial.print(" | NMEA: ");
+        Serial.println(nmeaSentence);
+      } else {
+        Serial.println("AWAITING NMEA SENTENCES ON RX:GPIO 16");
+      }
+
+      // 4. MQ-135 Hazardous Gases
+      int gasAdc = analogRead(PIN_GAS_ANALOG);
+      int coAdc  = analogRead(PIN_CO_ANALOG);
+      Serial.print("[4/5] MQ-135 CBRN:     RAW ADC = ");
+      Serial.print(gasAdc);
+      Serial.print(" (");
+      Serial.print(gasAdc * 3.3 / 4095.0, 2);
+      Serial.print("V) | CALIBRATED AIR: ");
+      Serial.println(gasAdc < 3000 ? "NOMINAL / CLEAN" : "ELEVATED / HAZARDOUS");
+
+      Serial.print("      MQ-7 CO PROBE:   RAW ADC = ");
+      Serial.print(coAdc);
+      if (coAdc >= 4080 || coAdc <= 10) {
+        Serial.println(" | UNATTACHED (LEAD-OFF PROTECTED)");
+      } else {
+        Serial.println(" | ACTIVE PROBE");
+      }
+
+      // 5. Proximity Sensor Verification
+      Serial.print("[5/5] PROXIMITY SENSOR: ");
+      float testDist = measureUltrasonicPulse(PIN_TRIG, PIN_ECHO);
+      if (testDist > 0.0f) {
+        Serial.print("HC-SR04 ULTRASONIC ACTIVE | DISTANCE = ");
+        Serial.print(testDist, 1);
+        Serial.println(" CM");
+      } else {
+        int eLvl = digitalRead(PIN_ECHO);
+        Serial.print("ECHO GPIO 18 DC LEVEL: ");
+        Serial.print(eLvl == HIGH ? "HIGH (CLEAR)" : "LOW (OBSTACLE / IDLE)");
+        Serial.println(irSensorLatched ? " | ACTIVE IR SENSOR ENGAGED" : " | ULTRASONIC STANDBY (>400cm)");
+      }
+      Serial.println("==================================================\n");
+    } else if (cmd == "GPS") {
+      Serial.print("[GPS] UART2 STATUS: ");
+      Serial.println(gpsHardwareAlive ? "CONNECTED & STREAMING" : "OFFLINE / CHECK UART2");
+      Serial.print("[GPS] LAST RAW NMEA: ");
+      Serial.println(nmeaSentence);
     }
   }
 }

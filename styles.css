@@ -2454,3 +2454,175 @@ body.light-theme .drawer-tx-input {
   color: #fff;
 }
 
+/* ==========================================================================
+   BIOMETRIC VITALS WIDGET — BPM / SpO2 (MAX30102)
+   ========================================================================== */
+.vitals-pulse-ring {
+  display: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 2px solid rgba(239, 68, 68, 0.0);
+  animation: vitalsPulse 1.2s ease-out infinite;
+}
+.vitals-pulse-ring.measuring { display: block; }
+
+@keyframes vitalsPulse {
+  0%   { border-color: rgba(239, 68, 68, 0.0); box-shadow: 0 0 0px rgba(239,68,68,0); }
+  30%  { border-color: rgba(239, 68, 68, 0.7); box-shadow: 0 0 20px rgba(239,68,68,0.25); }
+  100% { border-color: rgba(239, 68, 68, 0.0); box-shadow: 0 0 0px rgba(239,68,68,0); }
+}
+
+#card-vitals { position: relative; cursor: pointer; }
+#card-vitals.measuring {
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 22px rgba(239, 68, 68, 0.18);
+  cursor: default;
+}
+
+/* ==========================================================================
+   SOS EMERGENCY OVERLAY — FULL-SCREEN RED ALERT
+   ========================================================================== */
+.sos-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 4, 4, 0.92);
+  backdrop-filter: blur(4px);
+  animation: sosOverlayIn 0.35s ease-out;
+}
+.sos-overlay.hidden { display: none; }
+
+@keyframes sosOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+
+.sos-overlay-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sos-pulse-ring {
+  position: absolute;
+  width: 460px;
+  height: 460px;
+  border-radius: 50%;
+  border: 2px solid rgba(239, 68, 68, 0.35);
+  animation: sosBigPulse 1.4s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes sosBigPulse {
+  0%   { transform: scale(0.92); opacity: 0.8; }
+  50%  { transform: scale(1.08); opacity: 0.25; border-color: rgba(239,68,68,0.6); }
+  100% { transform: scale(0.92); opacity: 0.8; }
+}
+
+.sos-content {
+  position: relative;
+  background: linear-gradient(145deg, rgba(30, 8, 8, 0.98) 0%, rgba(60, 10, 10, 0.95) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  border-radius: 18px;
+  padding: 44px 52px;
+  text-align: center;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: 0 0 60px rgba(239,68,68,0.25), 0 0 120px rgba(239,68,68,0.10), inset 0 1px 0 rgba(255,255,255,0.06);
+  animation: sosContentPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sosContentPulse {
+  0%, 100% { box-shadow: 0 0 60px rgba(239,68,68,0.25), 0 0 120px rgba(239,68,68,0.10), inset 0 1px 0 rgba(255,255,255,0.06); }
+  50%       { box-shadow: 0 0 80px rgba(239,68,68,0.45), 0 0 140px rgba(239,68,68,0.20), inset 0 1px 0 rgba(255,255,255,0.06); }
+}
+
+.sos-icon-wrap {
+  margin-bottom: 18px;
+  animation: sosIconFlash 0.9s ease-in-out infinite;
+}
+@keyframes sosIconFlash {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 12px rgba(255,44,44,0.8)); }
+  50%       { opacity: 0.55; filter: drop-shadow(0 0 4px rgba(255,44,44,0.3)); }
+}
+
+.sos-header-text {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: #ff2c2c;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px rgba(255,44,44,0.6);
+  margin-bottom: 6px;
+}
+
+.sos-sub-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: rgba(255,140,140,0.75);
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+.sos-coord-row, .sos-timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.sos-coord-label, .sos-timer-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: rgba(255,140,140,0.55);
+  text-transform: uppercase;
+}
+
+.sos-coord-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,200,200,0.85);
+  letter-spacing: 0.05em;
+}
+
+.sos-timer-val {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 900;
+  color: #ff4444;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 18px rgba(255,44,44,0.5);
+  line-height: 1;
+  margin-bottom: 28px;
+}
+
+.btn-sos-cancel {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 11px 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.35);
+  background: rgba(255,255,255,0.06);
+  color: rgba(200,210,220,0.75);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.btn-sos-cancel:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(148,163,184,0.6);
+  color: #fff;
+}

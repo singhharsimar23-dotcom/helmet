@@ -576,10 +576,17 @@ void handleIncomingCommands() {
       Serial.print(" | MQ135:"); Serial.print(analogRead(PIN_GAS_ANALOG));
       Serial.print(" | MQ9:"); Serial.println(analogRead(PIN_CO_ANALOG));
     } else if (cmd == "BUZZ" || cmd == "BUZZER_ON") {
+      // Short 800ms test pulse (diagnostic)
       digitalWrite(PIN_BUZZER, HIGH);
       delay(800);
       digitalWrite(PIN_BUZZER, LOW);
       Serial.println("[ACK] BUZZER PULSED 800MS (PIN 23)");
+    } else if (cmd == "CMD:BUZZER_ON") {
+      // Dashboard IR-proximity continuous tone (held until CMD:BUZZER_OFF)
+      if (!isDistressActive) {
+        chirpBuzzer(1, 120, 0); // sharp 120ms beep when obstacle first hits
+      }
+      Serial.println("[ACK] IR OBSTACLE BUZZ TRIGGERED");
     } else if (cmd.startsWith("BUZZ_PIN:")) {
       int testPin = cmd.substring(9).toInt();
       pinMode(testPin, OUTPUT);
@@ -587,9 +594,8 @@ void handleIncomingCommands() {
       delay(800);
       digitalWrite(testPin, LOW);
       Serial.print("[ACK] TESTED PIN "); Serial.println(testPin);
-    } else if (cmd == "BUZZER_OFF") {
-      isDistressActive = false;
-      setBuzzer(false);
+    } else if (cmd == "BUZZER_OFF" || cmd == "CMD:BUZZER_OFF") {
+      if (!isDistressActive) setBuzzer(false);
       Serial.println("[ACK] BUZZER SILENCED");
     } else if (cmd == "HEALTH" || cmd == "TEST") {
       Serial.println("\n==================================================");

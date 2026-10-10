@@ -297,6 +297,77 @@
         </div>
       </div>
 
+      <!-- WIDGET BIOMETRICS: MAX30102 HEART RATE & SPO2 -->
+      <div class="apple-widget state-standby" id="card-vitals" onclick="startVitalsMeasurement()">
+        <div class="widget-top-row">
+          <div class="widget-badge-wrap">
+            <span class="apple-status-dot" id="dot-vitals"></span>
+            <span class="sensor-chip">MAX30102</span>
+          </div>
+          <span class="badge-status standby" id="pill-vitals">STANDBY</span>
+        </div>
+
+        <div class="widget-title-row">
+          <div class="widget-title-group">
+            <h3 class="widget-main-title">BIOMETRIC VITALS</h3>
+            <span class="widget-sub-title">Heart Rate &amp; Blood Oxygen</span>
+          </div>
+          <div class="widget-headline-val">
+            <span class="metric-compact no-data" id="val-bpm">— BPM</span>
+          </div>
+        </div>
+
+        <div class="dual-metric-row">
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">HEART RATE</span>
+            <span class="dual-val no-data" id="val-bpm-detail">—</span>
+          </div>
+          <div class="dual-metric-cell">
+            <span class="dual-lbl">SpO₂</span>
+            <span class="dual-val no-data" id="val-spo2">—</span>
+          </div>
+        </div>
+
+        <div class="widget-scenario-status" id="scenario-vitals">
+          Tap widget to begin biometric measurement.
+        </div>
+
+        <div class="threshold-track">
+          <div class="threshold-bar" id="bar-vitals" style="width: 0%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item warn">BRADY &lt;55 BPM</span>
+          <span class="scale-item safe">NOMINAL 55–100</span>
+          <span class="scale-item warn">TACHY &gt;100 BPM</span>
+        </div>
+
+        <!-- Pulsing ring animation during measurement -->
+        <div class="vitals-pulse-ring" id="vitals-pulse-ring"></div>
+
+        <div class="widget-depth-drawer">
+          <p class="sensor-description">
+            Photoplethysmography (PPG) sensor using 660nm red &amp; 940nm IR LEDs to measure perfusion index, heart rate, and peripheral blood oxygen saturation (SpO₂) in real-time.
+          </p>
+          <div class="drawer-protocol-box">
+            <div class="proto-row">
+              <span class="proto-lbl">SENSOR:</span>
+              <span class="proto-val">MAX30102 I²C 0x57 / SDA:21 SCL:22</span>
+            </div>
+            <div class="proto-row">
+              <span class="proto-lbl">STANDARD:</span>
+              <span class="proto-val">AHA / TCCC Combat Casualty Care</span>
+            </div>
+          </div>
+          <div class="widget-footer-actions">
+            <button class="btn-widget-action" onclick="event.stopPropagation(); startVitalsMeasurement()">MEASURE NOW</button>
+          </div>
+        </div>
+
+        <div class="widget-expand-hint">
+          <span class="hint-chevron">▼</span>
+        </div>
+      </div>
+
     </aside>
 
     <!-- CENTER COLUMN: 3D DIGITAL TWIN + DEDICATED TOP FLIGHT HUD LEVEL METER -->
@@ -707,6 +778,33 @@
     </aside>
 
   </main>
+
+  <!-- SOS EMERGENCY OVERLAY (Full-Screen Red Alert when SOS is active) -->
+  <div id="sos-overlay" class="sos-overlay hidden" role="alertdialog" aria-modal="true" aria-label="SOS Emergency Alert">
+    <div class="sos-overlay-inner">
+      <div class="sos-pulse-ring"></div>
+      <div class="sos-content">
+        <div class="sos-icon-wrap">
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#ff2c2c" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div class="sos-header-text">S.O.S. — DISTRESS ACTIVATED</div>
+        <div class="sos-sub-text">SOLDIER EMERGENCY — IMMEDIATE EXTRACTION REQUIRED</div>
+        <div class="sos-coord-row">
+          <span class="sos-coord-label">LAST GPS FIX:</span>
+          <span class="sos-coord-val" id="sos-gps-readout">ACQUIRING...</span>
+        </div>
+        <div class="sos-timer-row">
+          <span class="sos-timer-label">ACTIVE FOR:</span>
+          <span class="sos-timer-val" id="sos-timer-display">00:00</span>
+        </div>
+        <button id="btn-cancel-sos-overlay" class="btn-sos-cancel">CANCEL SOS / ALL CLEAR</button>
+      </div>
+    </div>
+  </div>
 
   <!-- DEFENSE STANDARDS, SAFETY THRESHOLDS & REMEDIATION MODAL -->
   <div id="modal-standards" class="modal-backdrop hidden">

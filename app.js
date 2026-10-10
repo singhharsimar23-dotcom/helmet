@@ -2595,7 +2595,31 @@ function updateDashboardUI(t) {
   } else {
     UI.incidentBanner?.classList.add('hidden');
   }
+
+  // 9. SOS OVERLAY — show/hide based on telemetry sos flag
+  if (t.sos) {
+    showSosOverlay();
+  } else {
+    hideSosOverlay();
+  }
+
+  // 10. IR PROXIMITY → BUZZER (send serial command when obstacle state changes)
+  //     Only fires when NOT in SOS mode (SOS buzzer takes priority)
+  const _isObstacleNow = (t.irStatus && t.irStatus.includes('OBSTACLE')) ||
+                         (t.obstacle === 1 || t.obstacle === true);
+  if (!t.sos) {
+    if (_isObstacleNow && !state._lastIrBuzzerOn) {
+      state._lastIrBuzzerOn = true;
+      sendSerialCommand('CMD:BUZZER_ON');
+      logTerminal('[IR] Obstacle detected — BUZZER ON');
+    } else if (!_isObstacleNow && state._lastIrBuzzerOn) {
+      state._lastIrBuzzerOn = false;
+      sendSerialCommand('CMD:BUZZER_OFF');
+      logTerminal('[IR] Obstacle cleared — BUZZER OFF');
+    }
+  }
 }
+
 
 // ============================================================================
 // 6. WEB SERIAL API HARDWARE INGESTION (DIRECT USB CONNECTION)
@@ -3403,7 +3427,129 @@ function initEventListeners() {
 window.sendSerialCommand = sendSerialCommand;
 window.toggleSerialConsole = toggleSerialConsole;
 
+// ============================================================================
+// BIOMETRIC VITALS WIDGET — BPM / SpO2 (Mock measurement on click)
+// ============================================================================
+let _vitalsTimer = null;
+
+function startVitalsMeasurement() {
+  const card    = document.getElementById('card-vitals');
+  const ring    = document.getElementById('vitals-pulse-ring');
+  const pill    = document.getElementById('pill-vitals');
+  const dot     = document.getElementById('dot-vitals');
+  const valBpm  = document.getElementById('val-bpm');
+  const valBpmD = document.getElementById('val-bpm-detail');
+  const valSpo2 = document.getElementById('val-spo2');
+  const bar     = document.getElementById('bar-vitals');
+  const scn     = document.getElementById('scenario-vitals');
+
+  if (card.classList.contains('measuring')) return; // already running
+
+  // Measuring state UI
+  card.classList.add('measuring');
+  if (ring)  ring.classList.add('measuring');
+  if (pill)  { pill.textContent = 'MEASURING...'; pill.className = 'badge-status warn'; }
+  if (dot)   dot.className = 'apple-status-dot state-warning';
+  if (valBpm) { valBpm.textContent = '...'; valBpm.className = 'metric-compact'; }
+  if (scn)   scn.textContent = 'Biometric scan in progress — hold still...';
+
+  // Simulate a 3-second measurement delay, then show nominal values
+  if (_vitalsTimer) clearTimeout(_vitalsTimer);
+  _vitalsTimer = setTimeout(() => {
+    // Nominal mock values (as user requested — only hardcoded for this mock sensor)
+    const bpm  = Math.round(68 + Math.random() * 14);   // 68–82 bpm
+    const spo2 = (97.5 + Math.random() * 1.5).toFixed(1); // 97.5–99.0 %
+
+    const isHigh = bpm > 100;
+    const isLow  = bpm < 55;
+    const status = isHigh ? 'TACHYCARDIA' : isLow ? 'BRADYCARDIA' : 'NOMINAL';
+    const cls    = isHigh || isLow ? 'warn' : 'safe';
+    const dotCls = isHigh || isLow ? 'apple-status-dot state-warning' : 'apple-status-dot state-nominal';
+    const bpmPct = Math.min(100, Math.max(0, (bpm / 140) * 100));
+
+    if (valBpm)  { valBpm.textContent  = `${bpm} BPM`; valBpm.className = 'metric-compact'; }
+    if (valBpmD) { valBpmD.textContent = `${bpm} BPM`; valBpmD.className = 'dual-val'; }
+    if (valSpo2) { valSpo2.textContent = `${spo2} %`;  valSpo2.className = 'dual-val'; }
+    if (bar)     { bar.style.width = `${bpmPct}%`; bar.className = `threshold-bar ${cls}`; }
+    if (pill)    { pill.textContent = status; pill.className = `badge-status ${cls}`; }
+    if (dot)     dot.className = dotCls;
+    if (card)    card.className = `apple-widget ${isHigh || isLow ? 'state-warning' : 'state-nominal'}`;
+    if (scn)     scn.textContent = `HR ${bpm} BPM — SpO\u2082 ${spo2}% — ${status}: Soldier biometrics nominal.`;
+    if (ring)    ring.classList.remove('measuring');
+
+    playTacticalChirp(1100, 'sine', 0.05, 0.15);
+    logTerminal(`[VITALS] HR: ${bpm} BPM | SpO\u2082: ${spo2}% | Status: ${status}`);
+    _vitalsTimer = null;
+  }, 3000);
+}
+
+// ============================================================================
+// SOS EMERGENCY OVERLAY
+// ============================================================================
+let _sosOverlayActive    = false;
+let _sosStartTime        = 0;
+let _sosTimerInterval    = null;
+
+function showSosOverlay() {
+  if (_sosOverlayActive) return;
+  _sosOverlayActive = true;
+  _sosStartTime     = Date.now();
+
+  const overlay = document.getElementById('sos-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+
+  // Update GPS coordinate display
+  const gpsEl = document.getElementById('sos-gps-readout');
+  if (gpsEl) {
+    const t = state.telemetry;
+    if (t.lat !== null && t.lng !== null && (Math.abs(t.lat) > 0 || Math.abs(t.lng) > 0)) {
+      gpsEl.textContent = `${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E`;
+    } else {
+      gpsEl.textContent = 'ACQUIRING...';
+    }
+  }
+
+  // Start elapsed timer
+  const timerEl = document.getElementById('sos-timer-display');
+  if (_sosTimerInterval) clearInterval(_sosTimerInterval);
+  _sosTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - _sosStartTime) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    if (timerEl) timerEl.textContent = `${mm}:${ss}`;
+  }, 1000);
+
+  document.body.classList.add('sos-active');
+}
+
+function hideSosOverlay() {
+  if (!_sosOverlayActive) return;
+  _sosOverlayActive = false;
+  if (_sosTimerInterval) { clearInterval(_sosTimerInterval); _sosTimerInterval = null; }
+
+  const overlay = document.getElementById('sos-overlay');
+  if (overlay) overlay.classList.add('hidden');
+  document.body.classList.remove('sos-active');
+}
+
+// Wire up the cancel button inside the overlay
+document.addEventListener('DOMContentLoaded', () => {
+  const cancelBtn = document.getElementById('btn-cancel-sos-overlay');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      hideSosOverlay();
+      state.telemetry.sos = false;
+      const manualSosBtn = document.getElementById('btn-manual-sos');
+      if (manualSosBtn) manualSosBtn.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+      sendSerialCommand('CMD:SOS_OFF');
+      logTerminal('[SOS] Overlay dismissed — SOS cancelled. Buzzer silenced.');
+    });
+  }
+});
+
+// ============================================================================
 // Window Load Lifecycle
+// ============================================================================
 window.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initThreeHoloChamber();
@@ -3414,3 +3560,5 @@ window.addEventListener('DOMContentLoaded', () => {
   logTerminal('[SERIAL] Click CONNECT USB to open COM4 at 115200 Baud. Ensure Arduino IDE is CLOSED.');
   logTerminal('[CALIBRATION] MQ-135 & MQ-7 ADC→PPM conversion active. DO pin comparator gating enabled.');
 });
+
+window.startVitalsMeasurement = startVitalsMeasurement;

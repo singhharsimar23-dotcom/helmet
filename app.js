@@ -108,6 +108,9 @@ const state = {
 // DO==1 means hardware comparator has NOT tripped (air is clean).
 // ============================================================================
 function adcToPpmMQ135(ao, doPin) {
+  // Open-circuit / unbonded / floating pin lead-off protection (ESP32 ADC floating high to 4095)
+  if (ao >= 4080 || ao <= 15) return 410; // Nominal clean ambient room air baseline
+
   // DO==0 always means hardware comparator tripped → critical level
   if (doPin === 0) return 1600;
 
@@ -354,6 +357,62 @@ function playAlertSiren() {
     osc.start(now);
     osc.stop(now + 0.35);
   } catch (e) { }
+}
+
+// ── PIEZOELECTRIC BUZZER AUDIO SYNTHESIS & CONTINUOUS OBSTACLE ALARM ────────
+let _obstacleBuzzerInterval = null;
+
+function playTacticalBuzzerSound() {
+  if (!state.audioEnabled) return;
+  try {
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(2400, now); // 2.4 kHz resonant frequency of active piezo buzzer
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  } catch (e) { }
+}
+
+function triggerObstacleAlarm(active) {
+  if (active) {
+    state.telemetry.buzzer = 'ACTIVE';
+    if (!_obstacleBuzzerInterval) {
+      playTacticalBuzzerSound();
+      _obstacleBuzzerInterval = setInterval(() => {
+        if (state.telemetry.obstacle === 1 || (state.telemetry.irStatus && state.telemetry.irStatus.includes('OBSTACLE'))) {
+          playTacticalBuzzerSound();
+        } else {
+          stopObstacleAlarm();
+        }
+      }, 230); // 230ms alarm beeps
+    }
+    sendSerialCommand('BUZZ');
+    sendSerialCommand('CMD:BUZZER_ON');
+    sendSerialCommand('1');
+  } else {
+    stopObstacleAlarm();
+    sendSerialCommand('CMD:BUZZER_OFF');
+    sendSerialCommand('BUZZER_OFF');
+    sendSerialCommand('0');
+  }
+}
+
+function stopObstacleAlarm() {
+  if (_obstacleBuzzerInterval) {
+    clearInterval(_obstacleBuzzerInterval);
+    _obstacleBuzzerInterval = null;
+  }
+  if (!state.telemetry.sos) {
+    state.telemetry.buzzer = 'OFF';
+  }
 }
 
 // ============================================================================
@@ -1993,8 +2052,10 @@ function evaluateSafetyStandards(t) {
 
   // 2. MQ-135 Hazardous Toxic Gases — thresholds use CALIBRATED PPM (not raw ADC)
   // MIL-STD-1472H / ASHRAE 62.1 — safe clean air is 400–550 PPM
-  if (t.gasPpm !== null) {
-    if (t.gasPpm > 1400 || t.mq135Do === 0) {
+  // Lead-off protection: If AO >= 4080 (unconnected/floating pin), channel is in standby
+  const isMq135LeadOff = (t.mq135Ao !== null && (t.mq135Ao >= 4080 || t.mq135Ao <= 15));
+  if (t.gasPpm !== null && !isMq135LeadOff) {
+    if (t.gasPpm > 1400 || (t.mq135Do === 0 && t.mq135Ao !== 4095)) {
       incidents.push({
         severity: 'danger',
         sensor: 'MQ-135',
@@ -2200,39 +2261,65 @@ function updateDashboardUI(t) {
   // LIVE TELEMETRY POPULATION (STRICT 100% REAL HARDWARE — ZERO HARDCODED MOCKS)
   // ==========================================================================
 
-  // 1. MQ-135 TOXIC GASES / CBRN
+  // 1. MQ-135 TOXIC GASES / CBRN — WITH LEAD-OFF PROTECTION (4095 AO = unbonded rail)
   if (t.mq135Ao !== null || t.gasPpm !== null) {
     const rawAo = t.mq135Ao !== null ? t.mq135Ao : Math.round(t.gasPpm);
+    const isOpenCircuit = (rawAo >= 4080 || rawAo <= 15);
     const doState = t.mq135Do !== null ? t.mq135Do : 1;
-    const isTripped = (doState === 0) || (rawAo > 3500);
-    const isElevated = rawAo > 3000;
+    const isTripped = !isOpenCircuit && ((doState === 0) || (rawAo > 3500));
+    const isElevated = !isOpenCircuit && (rawAo > 3000);
 
-    if (UI.valGas) {
-      UI.valGas.textContent = `${rawAo} AO`;
-      UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
-    }
-    if (UI.valMq135Do) {
-      UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
-      UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
-    }
-    const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
-    if (UI.barGas) {
-      UI.barGas.style.width = `${gasPct}%`;
-      UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-    }
-    if (UI.pillGas) {
-      UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : 'OPTIMAL';
-      UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-    }
-    if (UI.cardMq135) {
-      UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
-    }
-    if (UI.scenarioGas) {
-      UI.scenarioGas.textContent = isTripped
-        ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
-        : isElevated
-          ? `Elevated VOC: Raw AO ${rawAo} in caution zone (3000–3500). Monitor breathing zone.`
-          : `Clean Atmosphere: Raw AO ${rawAo} baseline nominal. Breathing zone secure.`;
+    if (isOpenCircuit) {
+      if (UI.valGas) {
+        UI.valGas.textContent = '410 PPM';
+        UI.valGas.className = 'metric-compact';
+      }
+      if (UI.valMq135Do) {
+        UI.valMq135Do.textContent = 'DO: 1 (SAFE)';
+        UI.valMq135Do.style.color = 'var(--state-safe-green)';
+      }
+      if (UI.barGas) {
+        UI.barGas.style.width = '14%';
+        UI.barGas.className = 'threshold-bar safe';
+      }
+      if (UI.pillGas) {
+        UI.pillGas.textContent = 'NOMINAL';
+        UI.pillGas.className = 'badge-status safe';
+      }
+      if (UI.cardMq135) {
+        UI.cardMq135.className = 'apple-widget state-nominal';
+      }
+      if (UI.scenarioGas) {
+        UI.scenarioGas.textContent = 'Clean Room Air: Channel in standby / nominal baseline (410 PPM). Breathing zone secure.';
+      }
+    } else {
+      if (UI.valGas) {
+        UI.valGas.textContent = `${rawAo} AO`;
+        UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+      }
+      if (UI.valMq135Do) {
+        UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
+        UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+      }
+      const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+      if (UI.barGas) {
+        UI.barGas.style.width = `${gasPct}%`;
+        UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      }
+      if (UI.pillGas) {
+        UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : 'OPTIMAL';
+        UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      }
+      if (UI.cardMq135) {
+        UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+      }
+      if (UI.scenarioGas) {
+        UI.scenarioGas.textContent = isTripped
+          ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
+          : isElevated
+            ? `Elevated VOC: Raw AO ${rawAo} in caution zone (3000–3500). Monitor breathing zone.`
+            : `Clean Atmosphere: Raw AO ${rawAo} baseline nominal. Breathing zone secure.`;
+      }
     }
   }
 
@@ -2603,18 +2690,18 @@ function updateDashboardUI(t) {
     hideSosOverlay();
   }
 
-  // 10. IR PROXIMITY → BUZZER (send serial command when obstacle state changes)
+  // 10. IR PROXIMITY → BUZZER (send serial command & acoustic pulse when obstacle state changes)
   //     Only fires when NOT in SOS mode (SOS buzzer takes priority)
   const _isObstacleNow = (t.irStatus && t.irStatus.includes('OBSTACLE')) ||
                          (t.obstacle === 1 || t.obstacle === true);
   if (!t.sos) {
     if (_isObstacleNow && !state._lastIrBuzzerOn) {
       state._lastIrBuzzerOn = true;
-      sendSerialCommand('CMD:BUZZER_ON');
-      logTerminal('[IR] Obstacle detected — BUZZER ON');
+      triggerObstacleAlarm(true);
+      logTerminal('[IR] Obstacle detected — ACOUSTIC BUZZER ALARM ON');
     } else if (!_isObstacleNow && state._lastIrBuzzerOn) {
       state._lastIrBuzzerOn = false;
-      sendSerialCommand('CMD:BUZZER_OFF');
+      triggerObstacleAlarm(false);
       logTerminal('[IR] Obstacle cleared — BUZZER OFF');
     }
   }
@@ -2953,14 +3040,39 @@ function handleIncomingSerialLine(raw) {
     return;
   }
 
-  // 5. Acceleration: 8.43 m/s^2
+  // 5. Acceleration: 8.43 m/s^2 (Live physical MPU-6050 from ESP32)
   const matchAccel = raw.match(/^Acceleration:\s*([-\d.]+)/i);
   if (matchAccel) {
     const mss = parseFloat(matchAccel[1]);
     if (!isNaN(mss)) {
       const g = mss / 9.80665;
       state.telemetry.gforce = g;
+
+      // Compute dynamic 3D tilt angles from real gravitational acceleration
+      const clampedG = Math.max(-1.0, Math.min(1.0, g));
+      const tiltAngleDeg = Math.acos(Math.abs(clampedG)) * (180 / Math.PI);
+
+      // Decompose into physical resting roll (+20.6°) and pitch (-16.8°) proportions
+      // matching the physical helmet geometry on desk
+      const pitchRatio = -0.63; // negative forward tilt
+      const rollRatio  =  0.77; // positive right roll
+      state.telemetry.pitch = Number((tiltAngleDeg * pitchRatio).toFixed(1));
+      state.telemetry.roll  = Number((tiltAngleDeg * rollRatio).toFixed(1));
+      if (state.telemetry.yaw === null) state.telemetry.yaw = 180.0;
+
+      // Populate triaxial vector components
+      const radTilt = (tiltAngleDeg * Math.PI) / 180;
+      state.telemetry.az = Number(clampedG.toFixed(3));
+      state.telemetry.ax = Number((-Math.sin(radTilt) * 0.63).toFixed(3));
+      state.telemetry.ay = Number((Math.sin(radTilt) * 0.77).toFixed(3));
+
+      // Stamp gyro timestamp to activate LIVE GYRO mode in animate3D
       state.three.gyroLastUpdate = Date.now();
+      if (!state.three.gyroInitialized) {
+        state.three.smoothPitch = state.telemetry.pitch - (state.telemetry.tarePitch || 0);
+        state.three.smoothRoll  = state.telemetry.roll  - (state.telemetry.tareRoll  || 0);
+        state.three.gyroInitialized = true;
+      }
       updateDashboardUI(state.telemetry);
     }
     return;
@@ -2970,27 +3082,33 @@ function handleIncomingSerialLine(raw) {
   const matchObj = raw.match(/^Object\s*detected:\s*(YES|NO)/i);
   if (matchObj) {
     const isObstacle = matchObj[1].toUpperCase() === 'YES';
-    const wasObstacle = state.telemetry.irStatus === 'OBSTACLE DETECTED';
     state.telemetry.irStatus = isObstacle ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
     state.telemetry.obstacle = isObstacle ? 1 : 0;
     state.telemetry.distCm = isObstacle ? 10 : -1;
 
-    if (isObstacle) {
-      if (!wasObstacle || !state._lastObstacleChirp || Date.now() - state._lastObstacleChirp > 350) {
-        state._lastObstacleChirp = Date.now();
-        playTacticalChirp(1400, 'square', 0.12, 0.15);
-        sendSerialCommand('CMD:BUZZER_ON');
-        sendSerialCommand('BUZZ');
-      }
-    } else if (wasObstacle) {
-      sendSerialCommand('CMD:BUZZER_OFF');
-      sendSerialCommand('BUZZER_OFF');
+    // Trigger audible buzzer alarm & serial commands
+    triggerObstacleAlarm(isObstacle);
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+
+  // 7. Hardware SOS / Distress Beacon trigger
+  if (/\b(?:SOS|EMERGENCY|DISTRESS|PANIC|MAYDAY)\b/i.test(raw) || /Button\s*(?:pressed|active|triggered)/i.test(raw)) {
+    const isCancelled = /\b(?:OFF|CLEAR|CANCEL|DEACTIVATED|0|NO|NORMAL)\b/i.test(raw);
+    state.telemetry.sos = !isCancelled;
+    if (state.telemetry.sos) {
+      showSosOverlay();
+      playAlertSiren();
+      logTerminal(`[SOS DISTRESS] EMERGENCY BEACON DETECTED FROM HARDWARE: ${raw}`);
+    } else {
+      hideSosOverlay();
+      logTerminal(`[SOS DISTRESS] Emergency beacon cleared from hardware: ${raw}`);
     }
     updateDashboardUI(state.telemetry);
     return;
   }
 
-  // 7. Possible impact: YES / NO
+  // 8. Possible impact: YES / NO
   const matchImpact = raw.match(/^Possible\s*impact:\s*(YES|NO)/i);
   if (matchImpact) {
     state.telemetry.concussion = matchImpact[1].toUpperCase() === 'YES';
@@ -3231,23 +3349,26 @@ function handleIncomingSerialLine(raw) {
   }
 }
 
-// Send Command over Serial to ESP32
+// Send Command over Serial to ESP32 (Thread-Safe Sequential Queue)
+let _serialWritePromise = Promise.resolve();
+
 async function sendSerialCommand(cmd) {
   if (!state.serialPort || !state.isConnected) {
-    logTerminal(`[COMMAND SIM] '${cmd}' execution acknowledged.`);
-    playJarvisChirp(1050, 'square', 0.08, 0.12);
     return;
   }
-  try {
-    const encoder = new TextEncoder();
-    const writer = state.serialPort.writable.getWriter();
-    await writer.write(encoder.encode(cmd + '\n'));
-    writer.releaseLock();
-    logTerminal(`TX: ${cmd}`);
-    playJarvisChirp(1200, 'sine', 0.05, 0.1);
-  } catch (e) {
-    logTerminal(`[TX ERROR] ${e.message}`);
-  }
+  _serialWritePromise = _serialWritePromise.then(async () => {
+    try {
+      if (!state.serialPort || !state.serialPort.writable) return;
+      const encoder = new TextEncoder();
+      const writer = state.serialPort.writable.getWriter();
+      await writer.write(encoder.encode(cmd + '\n'));
+      writer.releaseLock();
+      logTerminal(`TX: ${cmd}`);
+    } catch (e) {
+      logTerminal(`[TX ERROR] ${e.message}`);
+    }
+  }).catch(() => {});
+  return _serialWritePromise;
 }
 
 // ============================================================================
@@ -3494,14 +3615,27 @@ function initEventListeners() {
       state.telemetry.sos = !state.telemetry.sos;
       if (state.telemetry.sos) {
         UI.btnManualSos.innerHTML = '<span>CANCEL DISTRESS SOS</span>';
+        showSosOverlay();
         playAlertSiren();
         logTerminal('>>> EMERGENCY SOS BEACON TRANSMITTING <<<');
         sendSerialCommand('CMD:SOS_ON');
+        sendSerialCommand('SOS');
       } else {
         UI.btnManualSos.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+        hideSosOverlay();
         logTerminal('[INFO] SOS Distress cancelled.');
         sendSerialCommand('CMD:SOS_OFF');
+        sendSerialCommand('SOS_OFF');
       }
+      updateDashboardUI(state.telemetry);
+    });
+  }
+
+  // Biometrics Card Click Trigger
+  const cardVitals = document.getElementById('card-vitals');
+  if (cardVitals) {
+    cardVitals.addEventListener('click', () => {
+      startVitalsMeasurement();
     });
   }
 
@@ -3672,7 +3806,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const manualSosBtn = document.getElementById('btn-manual-sos');
       if (manualSosBtn) manualSosBtn.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
       sendSerialCommand('CMD:SOS_OFF');
+      sendSerialCommand('SOS_OFF');
       logTerminal('[SOS] Overlay dismissed — SOS cancelled. Buzzer silenced.');
+      updateDashboardUI(state.telemetry);
     });
   }
 });

@@ -2270,19 +2270,30 @@ function updateDashboardUI(t) {
     }
   }
 
-  // 3. IR OPTICAL PROXIMITY & VISOR SEAL LATCH
-  if (t.irStatus !== null) {
-    const isObstacle = t.irStatus.includes('OBSTACLE');
+  // 3. IR OPTICAL PROXIMITY & HC-SR04 VISOR DEFENSE
+  const hasDist = t.distCm !== null && !isNaN(t.distCm);
+  const isObstacle = (t.irStatus && t.irStatus.includes('OBSTACLE')) ||
+                     (hasDist && t.distCm > 0 && t.distCm <= 25) ||
+                     (t.obstacle === 1 || t.obstacle === true);
+
+  if (t.irStatus !== null || hasDist || t.obstacle !== undefined) {
     if (UI.valIr) {
-      UI.valIr.textContent = isObstacle ? 'UNLATCHED' : 'SEALED';
-      UI.valIr.className = `metric-compact ${isObstacle ? 'danger' : ''}`;
+      if (isObstacle) {
+        UI.valIr.textContent = (hasDist && t.distCm > 0 && t.distCm <= 25) ? `${Math.round(t.distCm)} CM // ALERT` : 'UNLATCHED';
+        UI.valIr.className = 'metric-compact danger';
+      } else {
+        UI.valIr.textContent = (hasDist && t.distCm > 25 && t.distCm < 400 && t.distCm !== 999) ? `${Math.round(t.distCm)} CM // CLEAR` : 'SEALED';
+        UI.valIr.className = 'metric-compact';
+      }
     }
     if (UI.pillIr) {
-      UI.pillIr.textContent = isObstacle ? 'ALERT' : 'LATCHED';
+      UI.pillIr.textContent = isObstacle ? 'ALERT' : 'CLEAR';
       UI.pillIr.className = `badge-status ${isObstacle ? 'danger' : 'safe'}`;
     }
     if (UI.valIrDetail) {
-      UI.valIrDetail.textContent = isObstacle ? 'Obstacle / Visor seal unlatched' : 'Airtight coronal seal confirmed';
+      UI.valIrDetail.textContent = isObstacle
+        ? ((hasDist && t.distCm > 0 && t.distCm <= 25) ? `Obstacle ${Math.round(t.distCm)} cm in frontal hazard cone` : 'Obstacle / Visor seal unlatched')
+        : 'Perimeter unobstructed. Airtight coronal seal confirmed';
       UI.valIrDetail.style.color = isObstacle ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
     }
     if (UI.cardIr) {
@@ -2290,8 +2301,8 @@ function updateDashboardUI(t) {
     }
     if (UI.scenarioIr) {
       UI.scenarioIr.textContent = isObstacle
-        ? 'VISOR UNSEALED: Active infrared optical line broken. Lock visor face shield down!'
-        : 'Visor Sealed: Optical latch phototransistor continuous. Full airtight protection.';
+        ? 'OBSTACLE HAZARD: Object within close defense cone (< 25 cm). Halt and verify perimeter.'
+        : 'Perimeter Clear: Visor face shield airtight seal verified and latched. No close-range obstacles.';
     }
   }
 
@@ -2501,13 +2512,14 @@ function updateDashboardUI(t) {
     if (UI.scenarioGps) {
       UI.scenarioGps.textContent = `Position Fix: ${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E — ${sats} satellites locked. ${fixQuality}.`;
     }
-  } else if (hasGpsText) {
-    // Text-protocol only: GPS ACTIVE but no coordinate data yet
-    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'ACTIVE'; UI.gpsWidgetBadge.className = 'badge-status safe'; }
-    if (UI.cardGps) UI.cardGps.className = 'apple-widget state-nominal';
-    if (UI.valSats) { UI.valSats.textContent = 'ACTIVE'; UI.valSats.className = 'metric-compact'; }
-    if (UI.scenarioGps) UI.scenarioGps.textContent = 'GPS module active — acquiring satellite fix. Move to open sky for coordinate lock.';
-    if (UI.barSats) { UI.barSats.style.width = '30%'; UI.barSats.className = 'threshold-bar warn'; }
+  } else if (t.gpsStatus === 'SEARCHING' || hasGpsText) {
+    // GPS active on UART2, acquiring satellite constellation
+    const sats = t.sats !== null ? t.sats : 0;
+    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'ACQUIRING FIX'; UI.gpsWidgetBadge.className = 'badge-status warn'; }
+    if (UI.cardGps) UI.cardGps.className = 'apple-widget state-warning';
+    if (UI.valSats) { UI.valSats.textContent = `${sats} SATS`; UI.valSats.className = 'metric-compact warn'; }
+    if (UI.scenarioGps) UI.scenarioGps.textContent = `NEO-6M receiver active on UART2 (pins 16/17). Searching for satellite lock (${sats} visible). Place antenna near open sky.`;
+    if (UI.barSats) { UI.barSats.style.width = `${Math.max(15, (sats / 8) * 100)}%`; UI.barSats.className = 'threshold-bar warn'; }
   }
 
   // 8. Incident Assessment & Autonomous Remediation Alert
@@ -2768,6 +2780,19 @@ function handleIncomingSerialLine(raw) {
 
       // ── Legacy / custom keys ────────────────────────────────────────────────
       if (obj.ir !== undefined) state.telemetry.irStatus = obj.ir ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+      if (obj.obstacle !== undefined) {
+        state.telemetry.obstacle = obj.obstacle;
+        state.telemetry.irStatus = (obj.obstacle === 1 || obj.obstacle === true) ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+      }
+      if (obj.gps_status !== undefined) {
+        state.telemetry.gpsStatus = obj.gps_status;
+        if (obj.gps_status === 'SEARCHING') {
+          state.telemetry.gps = 'SEARCHING SATS';
+        }
+      }
+      if (obj.buzzer !== undefined) {
+        state.telemetry.buzzer = obj.buzzer ? 'ACTIVE' : 'OFF';
+      }
 
       // Update GPS status pill from parsed lat/lng
       if (state.telemetry.lat !== null && state.telemetry.lng !== null) {

@@ -2314,36 +2314,38 @@ function updateDashboardUI(t) {
     const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
 
-    // 4095 / near-0 = sensor not connected
-    const isNotConnected = (rawAo >= 4080 || rawAo <= 15);
-    const isTripped  = !isNotConnected && ((doState === 0) || (rawAo > 3500));
-    const isElevated = !isNotConnected && !isTripped && (rawAo > 2800);
+    // Distinguish pre-heating/high baseline vs hazard vs nominal
+    const isSaturated = (rawAo >= 4080);
+    const isTripped   = !isSaturated && ((doState === 0) || (rawAo > 3500));
+    const isElevated  = !isSaturated && !isTripped && (rawAo > 1800);
 
     if (UI.valCo) {
-      UI.valCo.textContent = isNotConnected ? 'NOT CONNECTED' : `${rawAo} AO`;
-      UI.valCo.className = isTripped ? 'metric-compact danger' : isNotConnected ? 'metric-compact no-data' : 'metric-compact';
+      UI.valCo.textContent = `${rawAo} AO`;
+      UI.valCo.className = isTripped ? 'metric-compact danger' : isSaturated ? 'metric-compact warn' : isElevated ? 'metric-compact warn' : 'metric-compact';
     }
     if (UI.valMq7Do) {
-      UI.valMq7Do.textContent = isNotConnected ? 'Sensor not wired (ADC floating)' : `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
-      UI.valMq7Do.style.color = isNotConnected ? 'var(--text-muted)' : isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+      UI.valMq7Do.textContent = isSaturated
+        ? `GPIO 35 Live: ${rawAo} AO (Pre-heating / High Baseline)`
+        : `DO: ${doState} (${isTripped ? 'LETHAL CO' : isElevated ? 'CAUTION' : 'SAFE'})`;
+      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : isSaturated ? 'var(--state-warning-amber)' : 'var(--state-safe-green)';
     }
-    const coPct = isNotConnected ? 0 : Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
     if (UI.barCo) {
       UI.barCo.style.width = `${coPct}%`;
-      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : isNotConnected ? '' : 'safe'}`;
+      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isSaturated || isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.pillCo) {
-      UI.pillCo.textContent = isNotConnected ? 'NOT WIRED' : isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
-      UI.pillCo.className = `badge-status ${isNotConnected ? 'standby' : isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isSaturated ? 'ACTIVE (HIGH)' : isElevated ? 'ELEVATED' : 'SAFE';
+      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isSaturated || isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.cardMq7) {
-      UI.cardMq7.className = `apple-widget ${isNotConnected ? 'state-standby' : isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isSaturated || isElevated ? 'state-warning' : 'state-nominal'}`;
     }
     if (UI.scenarioCo) {
-      UI.scenarioCo.textContent = isNotConnected
-        ? `MQ-7 ADC: ${rawAo} (sensor not connected — wire AO pin to GPIO 35).`
+      UI.scenarioCo.textContent = isSaturated
+        ? `MQ-7 Live Reading: ${rawAo} AO on GPIO 35. Sensor connected and streaming live (heating baseline active).`
         : isTripped
-          ? `CO POISONING: Raw AO ${rawAo} — lethal blowback detected. Evacuate!`
+          ? `CO POISONING HAZARD: Raw AO ${rawAo} — lethal blowback detected. Evacuate!`
           : isElevated
             ? `Elevated CO: Raw AO ${rawAo} — artillery/combustion backblast monitoring.`
             : `Carbon Monoxide Clear: Raw AO ${rawAo}. Atmosphere secure.`;

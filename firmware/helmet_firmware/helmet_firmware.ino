@@ -118,15 +118,14 @@ void setup() {
   initBuzzer();
   setBuzzer(false);
 
-  // SOS Button
+  // SOS Button (external GPIO 19 + onboard GPIO 0 BOOT button)
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
+  pinMode(0, INPUT_PULLUP);
 
-  // IR Obstacle Sensor — active-LOW (output goes LOW when object in front)
+  // IR Obstacle Sensor — check GPIO 18, 5, and 14 with pullup
   pinMode(PIN_IR_SENSOR, INPUT_PULLUP);
-
-  // HC-SR04 Trig (keep low, not actively used if IR sensor on pin 18)
-  pinMode(PIN_TRIG, OUTPUT);
-  digitalWrite(PIN_TRIG, LOW);
+  pinMode(PIN_TRIG, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
 
   // I2C
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -223,34 +222,31 @@ unsigned long lastProxMs = 0;
 
 void readIRObstacleSensor() {
   unsigned long now = millis();
-  if (now - lastProxMs < 50) return;
+  if (now - lastProxMs < 40) return;
   lastProxMs = now;
 
   // FC-51 / TCRT5000: OUT pin = LOW when obstacle, HIGH when clear
-  int irRaw = digitalRead(PIN_IR_SENSOR);
+  // Check GPIO 18 (ECHO), GPIO 5 (TRIG), and GPIO 14
+  int irRaw18 = digitalRead(PIN_IR_SENSOR);
+  int irRaw5  = digitalRead(PIN_TRIG);
+  int irRaw14 = digitalRead(14);
   bool prevObstacle = obstacleDetected;
-  obstacleDetected = (irRaw == LOW);
+  obstacleDetected = (irRaw18 == LOW || irRaw5 == LOW || irRaw14 == LOW);
 
   if (obstacleDetected) {
-    currentDistCm = 10.0f;  // approximate for IR (no actual distance)
+    currentDistCm = 10.0f;
 
-    // Buzz: 120ms ON every 250ms while obstacle present, not in SOS
+    // Buzz buzzer directly whenever obstacle is present (unless in SOS)
     if (!isDistressActive) {
-      if (now - lastObstacleBuzzMs >= 250) {
-        lastObstacleBuzzMs = now;
-        digitalWrite(PIN_BUZZER, HIGH);
-      } else if (now - lastObstacleBuzzMs >= 120) {
-        digitalWrite(PIN_BUZZER, LOW);
-      }
+      digitalWrite(PIN_BUZZER, HIGH);
     }
 
-    // Log on rising edge
     if (!prevObstacle) {
       Serial.println("[IR] OBSTACLE DETECTED — buzzer active");
     }
   } else {
     currentDistCm = -1.0f;
-    // Silence buzzer when clear (unless SOS or explicit buzzerState)
+    // Silence buzzer when clear (unless SOS or explicit buzzerState from dashboard)
     if (!isDistressActive && !buzzerState) {
       digitalWrite(PIN_BUZZER, LOW);
     }
@@ -507,9 +503,11 @@ void readAndTransmitTelemetry() {
 // SOS BUTTON (debounced toggle)
 // ============================================================================
 void checkSosButton() {
-  if (digitalRead(PIN_SOS_BTN) == LOW) {
-    delay(60);
-    if (digitalRead(PIN_SOS_BTN) == LOW) {
+  bool btn = (digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW);
+  if (btn) {
+    delay(50);
+    btn = (digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW);
+    if (btn) {
       isDistressActive = !isDistressActive;
       setBuzzer(isDistressActive);
       if (isDistressActive) {
@@ -518,7 +516,7 @@ void checkSosButton() {
       } else {
         Serial.println("[SOS] DISTRESS CLEARED");
       }
-      while (digitalRead(PIN_SOS_BTN) == LOW) delay(15);
+      while ((digitalRead(PIN_SOS_BTN) == LOW) || (digitalRead(0) == LOW)) delay(15);
     }
   }
 }
@@ -539,13 +537,15 @@ void handleIncomingCommands() {
     isDistressActive = false;
     if (!obstacleDetected) setBuzzer(false);
     Serial.println("[ACK] SOS CLEARED");
-  } else if (cmd == "BUZZ" || cmd == "BUZZER_ON" || cmd == "CMD:BUZZER_ON") {
-    if (!isDistressActive) {
-      chirpBuzzer(2, 120, 80);
+  } else if (cmd == "BUZZ" || cmd == "BUZZER_ON" || cmd == "CMD:BUZZER_ON" || cmd == "1") {
+    buzzerState = true;
+    digitalWrite(PIN_BUZZER, HIGH);
+    Serial.println("[ACK] BUZZER ON");
+  } else if (cmd == "BUZZER_OFF" || cmd == "CMD:BUZZER_OFF" || cmd == "0") {
+    buzzerState = false;
+    if (!obstacleDetected && !isDistressActive) {
+      digitalWrite(PIN_BUZZER, LOW);
     }
-    Serial.println("[ACK] BUZZ PULSE SENT");
-  } else if (cmd == "BUZZER_OFF" || cmd == "CMD:BUZZER_OFF") {
-    if (!isDistressActive) setBuzzer(false);
     Serial.println("[ACK] BUZZER OFF");
   } else if (cmd == "TARE") {
     compPitch = 0.0f; compRoll = 0.0f; firstMpuRead = true;

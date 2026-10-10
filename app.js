@@ -2898,6 +2898,136 @@ function handleIncomingSerialLine(raw) {
 
   const upper = raw.toUpperCase();
 
+  // ── HELMET STATUS PROTOCOL PARSER (ESP32 Live Hardware Output) ───────────────
+  if (upper.includes('HELMET STATUS')) {
+    state.packetCount++;
+    state.lastPacketTime = Date.now();
+    state.hasLiveStream = true;
+    if (UI.packetCounter) UI.packetCounter.textContent = `${state.packetCount} PKTS`;
+    return;
+  }
+
+  // 1. Temperature: 35.50 C (or "Temperature: Sensor unavailable")
+  const matchTemp = raw.match(/^Temperature:\s*([-\d.]+)\s*C/i);
+  if (matchTemp) {
+    const v = parseFloat(matchTemp[1]);
+    if (!isNaN(v) && v >= -40.0 && v <= 85.0) {
+      state.telemetry.ambientTemp = v;
+      updateDashboardUI(state.telemetry);
+    }
+    return;
+  }
+
+  // 2. Humidity: 46.20 % (or "Humidity: Sensor unavailable")
+  const matchHum = raw.match(/^Humidity:\s*([-\d.]+)\s*%/i);
+  if (matchHum) {
+    const v = parseFloat(matchHum[1]);
+    if (!isNaN(v) && v >= 0.0 && v <= 100.0) {
+      state.telemetry.humidity = v;
+      updateDashboardUI(state.telemetry);
+    }
+    return;
+  }
+
+  // 3. MQ-7 ADC: 1014
+  const matchMq7 = raw.match(/^MQ-?7\s*ADC:\s*([-\d.]+)/i);
+  if (matchMq7) {
+    const ao = parseFloat(matchMq7[1]);
+    if (!isNaN(ao)) {
+      state.telemetry.mq7Ao = Math.round(ao);
+      state.telemetry.coPpm = adcToPpmMQ7(ao, 1);
+      updateDashboardUI(state.telemetry);
+    }
+    return;
+  }
+
+  // 4. MQ-135 ADC: 4095
+  const matchMq135 = raw.match(/^MQ-?135\s*ADC:\s*([-\d.]+)/i);
+  if (matchMq135) {
+    const ao = parseFloat(matchMq135[1]);
+    if (!isNaN(ao)) {
+      state.telemetry.mq135Ao = Math.round(ao);
+      state.telemetry.gasPpm = adcToPpmMQ135(ao, 1);
+      updateDashboardUI(state.telemetry);
+    }
+    return;
+  }
+
+  // 5. Acceleration: 8.43 m/s^2
+  const matchAccel = raw.match(/^Acceleration:\s*([-\d.]+)/i);
+  if (matchAccel) {
+    const mss = parseFloat(matchAccel[1]);
+    if (!isNaN(mss)) {
+      const g = mss / 9.80665;
+      state.telemetry.gforce = g;
+      state.three.gyroLastUpdate = Date.now();
+      updateDashboardUI(state.telemetry);
+    }
+    return;
+  }
+
+  // 6. Object detected: YES / NO
+  const matchObj = raw.match(/^Object\s*detected:\s*(YES|NO)/i);
+  if (matchObj) {
+    const isObstacle = matchObj[1].toUpperCase() === 'YES';
+    const wasObstacle = state.telemetry.irStatus === 'OBSTACLE DETECTED';
+    state.telemetry.irStatus = isObstacle ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+    state.telemetry.obstacle = isObstacle ? 1 : 0;
+    state.telemetry.distCm = isObstacle ? 10 : -1;
+
+    if (isObstacle) {
+      if (!wasObstacle || !state._lastObstacleChirp || Date.now() - state._lastObstacleChirp > 350) {
+        state._lastObstacleChirp = Date.now();
+        playTacticalChirp(1400, 'square', 0.12, 0.15);
+        sendSerialCommand('CMD:BUZZER_ON');
+        sendSerialCommand('BUZZ');
+      }
+    } else if (wasObstacle) {
+      sendSerialCommand('CMD:BUZZER_OFF');
+      sendSerialCommand('BUZZER_OFF');
+    }
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+
+  // 7. Possible impact: YES / NO
+  const matchImpact = raw.match(/^Possible\s*impact:\s*(YES|NO)/i);
+  if (matchImpact) {
+    state.telemetry.concussion = matchImpact[1].toUpperCase() === 'YES';
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+
+  // 8. GPS fix: SEARCHING / LOCKED
+  const matchGps = raw.match(/^GPS\s*fix:\s*(.+)/i);
+  if (matchGps) {
+    const fixVal = matchGps[1].trim();
+    state.telemetry.gpsStatus = fixVal;
+    state.telemetry.gps = fixVal.toUpperCase() === 'SEARCHING' ? 'SEARCHING SATS' : fixVal;
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+
+  // 9. Environmental alert / Temperature alert lines (DO NOT match IR!)
+  if (/^(?:Environmental|Temperature)\s*alert:/i.test(raw)) {
+    return;
+  }
+
+  // 10. Heart Rate & SpO2
+  const matchHR = raw.match(/^Heart\s*Rate:\s*([-\d.]+)/i);
+  if (matchHR) {
+    state.telemetry.bpm = parseFloat(matchHR[1]);
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+  const matchSpO2 = raw.match(/^SpO2:\s*([-\d.]+)/i);
+  if (matchSpO2) {
+    state.telemetry.spo2 = parseFloat(matchSpO2[1]);
+    updateDashboardUI(state.telemetry);
+    return;
+  }
+
+  // Legacy line parsers:
   // 1. DHT22 Temperature & Humidity — robust regex handles variable whitespace
   if (upper.includes('DHT22') && upper.includes('TEMP')) {
     const match = raw.match(/(?:DHT22|TEMP|TEMPERATURE)[^\d-]*([-\d.]+)/i);
@@ -3052,8 +3182,8 @@ function handleIncomingSerialLine(raw) {
     return;
   }
 
-  // 5. IR Face Shield Proximity
-  if (upper.includes('IR') && !upper.includes('OLED')) {
+  // 5. IR Face Shield Proximity (legacy string parser)
+  if (/\bIR\b/i.test(raw) && !upper.includes('OLED') && !upper.includes('ENVIRONMENTAL')) {
     const isClear = upper.includes('CLEAR') || upper.includes('0');
     state.telemetry.irStatus = isClear ? 'SEALED & CLEAR' : 'OBSTACLE DETECTED';
     updateDashboardUI(state.telemetry);

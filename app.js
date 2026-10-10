@@ -1841,7 +1841,8 @@ function animate3D() {
   // Fresh data ALWAYS wins — even over a user drag that ended < 2 s ago.
   const gyroDataFresh = state.hasLiveStream &&
     state.three.gyroLastUpdate > 0 &&
-    (now - state.three.gyroLastUpdate) < 2000 &&
+    state.three.gyroInitialized &&
+    (now - state.three.gyroLastUpdate) < 3000 &&
     state.telemetry.pitch !== null &&
     !isNaN(state.telemetry.pitch);
 
@@ -2266,80 +2267,86 @@ function updateDashboardUI(t) {
   // LIVE TELEMETRY POPULATION (STRICT 100% REAL HARDWARE — ZERO HARDCODED MOCKS)
   // ==========================================================================
 
-  // 1. MQ-135 TOXIC GASES / CBRN (100% LIVE HARDWARE TELEMETRY — ZERO HARDCODED VALUES)
+  // 1. MQ-135 TOXIC GASES / CBRN
   if (t.mq135Ao !== null || t.gasPpm !== null) {
     const rawAo = t.mq135Ao !== null ? t.mq135Ao : Math.round(t.gasPpm);
     const doState = t.mq135Do !== null ? t.mq135Do : 1;
-    // Trip condition: hardware digital comparator trips (DO === 0) or elevated air contaminant surge
-    const isTripped = (doState === 0) || (rawAo > 3500 && rawAo < 4080);
-    const isElevated = (rawAo > 1500 && rawAo <= 3500);
-    const isMaxRailStandby = (rawAo >= 4080);
+
+    // 4095 / near-4095 = sensor not connected (floating ADC pin)
+    const isNotConnected = (rawAo >= 4080 || rawAo <= 15);
+    // Hardware comparator tripped OR elevated reading
+    const isTripped  = !isNotConnected && ((doState === 0) || (rawAo > 3500));
+    const isElevated = !isNotConnected && !isTripped && (rawAo > 2800);
 
     if (UI.valGas) {
-      UI.valGas.textContent = `${rawAo} AO`;
-      UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+      UI.valGas.textContent = isNotConnected ? 'NOT CONNECTED' : `${rawAo} AO`;
+      UI.valGas.className = isTripped ? 'metric-compact danger' : isNotConnected ? 'metric-compact no-data' : 'metric-compact';
     }
     if (UI.valMq135Do) {
-      UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
-      UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+      UI.valMq135Do.textContent = isNotConnected ? 'Sensor not wired (ADC floating)' : `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
+      UI.valMq135Do.style.color = isNotConnected ? 'var(--text-muted)' : isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
     }
-    const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    const gasPct = isNotConnected ? 0 : Math.min(100, Math.max(0, (rawAo / 4095) * 100));
     if (UI.barGas) {
       UI.barGas.style.width = `${gasPct}%`;
-      UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : isNotConnected ? '' : 'safe'}`;
     }
     if (UI.pillGas) {
-      UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : isMaxRailStandby ? 'STANDBY' : 'OPTIMAL';
-      UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      UI.pillGas.textContent = isNotConnected ? 'NOT WIRED' : isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : 'NOMINAL';
+      UI.pillGas.className = `badge-status ${isNotConnected ? 'standby' : isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.cardMq135) {
-      UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+      UI.cardMq135.className = `apple-widget ${isNotConnected ? 'state-standby' : isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
     }
     if (UI.scenarioGas) {
-      UI.scenarioGas.textContent = isTripped
-        ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
-        : isElevated
-          ? `Elevated VOC: Raw AO ${rawAo} in caution zone. Atmosphere responding to environmental change.`
-          : isMaxRailStandby
-            ? `Atmospheric Sensor: Live ADC ${rawAo} counts (Rail Standby). DO comparator: Armed & Clear.`
-            : `Clean Atmosphere: Raw AO ${rawAo} baseline nominal. Breathing zone secure.`;
+      UI.scenarioGas.textContent = isNotConnected
+        ? `MQ-135 ADC: ${rawAo} (sensor not connected — wire AO pin to GPIO 34).`
+        : isTripped
+          ? `CBRN HAZARD: Raw AO ${rawAo} — DO comparator tripped. Evacuate!`
+          : isElevated
+            ? `Elevated VOC: Raw AO ${rawAo} — caution zone. Monitor air quality.`
+            : `Atmosphere Clear: Raw AO ${rawAo} — breathing zone nominal.`;
     }
   }
 
-  // 2. MQ-7 CARBON MONOXIDE (CO) — FAANG-GRADE HARDWARE TELEMETRY WITH LEAD-OFF PROTECTION
-  // 2. MQ-7 CARBON MONOXIDE (CO) (100% LIVE HARDWARE TELEMETRY — ZERO HARDCODED VALUES)
+  // 2. MQ-7 CARBON MONOXIDE (CO)
   if (t.mq7Ao !== null || t.coPpm !== null) {
     const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
-    const isTripped = (doState === 0) || (rawAo > 3500 && rawAo < 4080);
-    const isElevated = (rawAo > 1500 && rawAo <= 3500);
+
+    // 4095 / near-0 = sensor not connected
+    const isNotConnected = (rawAo >= 4080 || rawAo <= 15);
+    const isTripped  = !isNotConnected && ((doState === 0) || (rawAo > 3500));
+    const isElevated = !isNotConnected && !isTripped && (rawAo > 2800);
 
     if (UI.valCo) {
-      UI.valCo.textContent = `${rawAo} AO`;
-      UI.valCo.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+      UI.valCo.textContent = isNotConnected ? 'NOT CONNECTED' : `${rawAo} AO`;
+      UI.valCo.className = isTripped ? 'metric-compact danger' : isNotConnected ? 'metric-compact no-data' : 'metric-compact';
     }
     if (UI.valMq7Do) {
-      UI.valMq7Do.textContent = `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
-      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+      UI.valMq7Do.textContent = isNotConnected ? 'Sensor not wired (ADC floating)' : `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
+      UI.valMq7Do.style.color = isNotConnected ? 'var(--text-muted)' : isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
     }
-    const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    const coPct = isNotConnected ? 0 : Math.min(100, Math.max(0, (rawAo / 4095) * 100));
     if (UI.barCo) {
       UI.barCo.style.width = `${coPct}%`;
-      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : isNotConnected ? '' : 'safe'}`;
     }
     if (UI.pillCo) {
-      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
-      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+      UI.pillCo.textContent = isNotConnected ? 'NOT WIRED' : isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
+      UI.pillCo.className = `badge-status ${isNotConnected ? 'standby' : isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
     }
     if (UI.cardMq7) {
-      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+      UI.cardMq7.className = `apple-widget ${isNotConnected ? 'state-standby' : isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
     }
     if (UI.scenarioCo) {
-      UI.scenarioCo.textContent = isTripped
-        ? `CO POISONING THREAT: Raw AO ${rawAo} lethal blowback! Immediate evacuation required.`
-        : isElevated
-          ? `Muzzle Blast / Combustion: Raw AO ${rawAo} elevated. Artillery backblast monitoring.`
-          : `Carbon Monoxide Clear: Raw AO ${rawAo} counts. Atmosphere secure (< 15 PPM).`;
+      UI.scenarioCo.textContent = isNotConnected
+        ? `MQ-7 ADC: ${rawAo} (sensor not connected — wire AO pin to GPIO 35).`
+        : isTripped
+          ? `CO POISONING: Raw AO ${rawAo} — lethal blowback detected. Evacuate!`
+          : isElevated
+            ? `Elevated CO: Raw AO ${rawAo} — artillery/combustion backblast monitoring.`
+            : `Carbon Monoxide Clear: Raw AO ${rawAo}. Atmosphere secure.`;
     }
   }
 
@@ -2640,10 +2647,12 @@ function updateDashboardUI(t) {
     UI.incidentBanner?.classList.add('hidden');
   }
 
-  // 9. SOS OVERLAY — show/hide based on telemetry sos flag
-  if (t.sos) {
+  // 9. SOS OVERLAY — only activate on rising edge (physical button press)
+  //    hideSosOverlay() is called when sos=0 to clear it.
+  //    We never auto-show from a routine telemetry render — only on transition.
+  if (t.sos && !_sosOverlayActive) {
     showSosOverlay();
-  } else {
+  } else if (!t.sos && _sosOverlayActive && !state._sosManualActive) {
     hideSosOverlay();
   }
 
@@ -3583,23 +3592,25 @@ function initEventListeners() {
     });
   }
 
-  // Actuator: Emergency SOS Beacon
+  // Actuator: Emergency SOS Beacon (dashboard manual button)
   if (UI.btnManualSos) {
     UI.btnManualSos.addEventListener('click', () => {
       state.telemetry.sos = !state.telemetry.sos;
+      state._sosManualActive = state.telemetry.sos;
       if (state.telemetry.sos) {
         UI.btnManualSos.innerHTML = '<span>CANCEL DISTRESS SOS</span>';
+        UI.btnManualSos.style.background = 'var(--state-danger-red)';
         showSosOverlay();
         playAlertSiren();
-        logTerminal('>>> EMERGENCY SOS BEACON TRANSMITTING <<<');
+        // Ring the physical buzzer via serial
         sendSerialCommand('CMD:SOS_ON');
-        sendSerialCommand('SOS');
+        logTerminal('>>> EMERGENCY SOS BEACON TRANSMITTING — PHYSICAL BUZZER ACTIVE <<<');
       } else {
         UI.btnManualSos.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+        UI.btnManualSos.style.background = '';
         hideSosOverlay();
-        logTerminal('[INFO] SOS Distress cancelled.');
         sendSerialCommand('CMD:SOS_OFF');
-        sendSerialCommand('SOS_OFF');
+        logTerminal('[SOS] Distress beacon cancelled.');
       }
       updateDashboardUI(state.telemetry);
     });
@@ -3777,10 +3788,13 @@ document.addEventListener('DOMContentLoaded', () => {
     cancelBtn.addEventListener('click', () => {
       hideSosOverlay();
       state.telemetry.sos = false;
+      state._sosManualActive = false;
       const manualSosBtn = document.getElementById('btn-manual-sos');
-      if (manualSosBtn) manualSosBtn.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+      if (manualSosBtn) {
+        manualSosBtn.innerHTML = '<span>TRANSMIT DISTRESS SOS</span>';
+        manualSosBtn.style.background = '';
+      }
       sendSerialCommand('CMD:SOS_OFF');
-      sendSerialCommand('SOS_OFF');
       logTerminal('[SOS] Overlay dismissed — SOS cancelled. Buzzer silenced.');
       updateDashboardUI(state.telemetry);
     });

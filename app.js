@@ -2235,8 +2235,8 @@ function updateDashboardUI(t) {
   }
 
   // 2. MQ-7 CARBON MONOXIDE (CO)
-  if (t.mq7Ao !== null || t.coPpm !== null) {
-    const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
+  if (t.mq7Ao !== null || t.coPpm !== null || t.gasPpm !== null) {
+    const rawAo = t.mq7Ao !== null ? t.mq7Ao : (t.coPpm !== null ? Math.round(t.coPpm) : Math.max(12, Math.round(t.gasPpm * 0.18)));
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
     const isTripped = (doState === 0) || (rawAo > 3500);
     const isElevated = rawAo > 3000;
@@ -2282,7 +2282,13 @@ function updateDashboardUI(t) {
         UI.valIr.textContent = (hasDist && t.distCm > 0 && t.distCm <= 25) ? `${Math.round(t.distCm)} CM // ALERT` : 'UNLATCHED';
         UI.valIr.className = 'metric-compact danger';
       } else {
-        UI.valIr.textContent = (hasDist && t.distCm > 25 && t.distCm < 400 && t.distCm !== 999) ? `${Math.round(t.distCm)} CM // CLEAR` : 'SEALED';
+        if (hasDist && t.distCm > 25 && t.distCm < 400 && t.distCm !== 999) {
+          UI.valIr.textContent = `${Math.round(t.distCm)} CM // CLEAR`;
+        } else if (hasDist && t.distCm === 999) {
+          UI.valIr.textContent = '> 400 CM // CLEAR';
+        } else {
+          UI.valIr.textContent = 'SEALED // CLEAR';
+        }
         UI.valIr.className = 'metric-compact';
       }
     }

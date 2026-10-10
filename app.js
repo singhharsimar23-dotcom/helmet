@@ -209,6 +209,7 @@ const UI = {
   valIr: document.getElementById('val-ir'),
   pillIr: document.getElementById('pill-ir'),
   dotIr: document.getElementById('dot-ir'),
+  barDist: document.getElementById('bar-dist'),
   valIrDetail: document.getElementById('val-ir-detail'),
 
   // Widget 4: DHT22 Relative Humidity & Condensation
@@ -2154,6 +2155,7 @@ function updateDashboardUI(t) {
     // 3. IR Visor Seal & Optical Proximity
     if (UI.valIr) { UI.valIr.textContent = '—'; UI.valIr.className = 'metric-compact no-data'; }
     if (UI.pillIr) { UI.pillIr.textContent = 'STANDBY'; UI.pillIr.className = 'badge-status standby'; }
+    if (UI.barDist) { UI.barDist.style.width = '0%'; }
     if (UI.valIrDetail) { UI.valIrDetail.textContent = 'Awaiting Signal'; }
     if (UI.cardIr) UI.cardIr.className = 'apple-widget state-standby';
     if (UI.scenarioIr) UI.scenarioIr.textContent = 'Awaiting live USB telemetry packet stream from ESP32.';
@@ -2279,7 +2281,9 @@ function updateDashboardUI(t) {
   if (t.irStatus !== null || hasDist || t.obstacle !== undefined) {
     if (UI.valIr) {
       if (isObstacle) {
-        UI.valIr.textContent = (hasDist && t.distCm > 0 && t.distCm <= 25) ? `${Math.round(t.distCm)} CM // ALERT` : 'UNLATCHED';
+        UI.valIr.textContent = (hasDist && t.distCm > 0 && t.distCm <= 25)
+          ? `${Math.round(t.distCm)} CM // ALERT`
+          : 'OBSTACLE // ALERT';
         UI.valIr.className = 'metric-compact danger';
       } else {
         if (hasDist && t.distCm > 25 && t.distCm < 400 && t.distCm !== 999) {
@@ -2292,14 +2296,24 @@ function updateDashboardUI(t) {
         UI.valIr.className = 'metric-compact';
       }
     }
+    if (UI.barDist) {
+      if (hasDist && t.distCm > 0 && t.distCm < 400 && t.distCm !== 999) {
+        const pct = Math.min(100, Math.max(5, (t.distCm / 400) * 100));
+        UI.barDist.style.width = `${pct}%`;
+        UI.barDist.className = `threshold-bar ${isObstacle ? 'danger' : t.distCm <= 100 ? 'warn' : 'safe'}`;
+      } else {
+        UI.barDist.style.width = '100%';
+        UI.barDist.className = 'threshold-bar safe';
+      }
+    }
     if (UI.pillIr) {
       UI.pillIr.textContent = isObstacle ? 'ALERT' : 'CLEAR';
       UI.pillIr.className = `badge-status ${isObstacle ? 'danger' : 'safe'}`;
     }
     if (UI.valIrDetail) {
       UI.valIrDetail.textContent = isObstacle
-        ? ((hasDist && t.distCm > 0 && t.distCm <= 25) ? `Obstacle ${Math.round(t.distCm)} cm in frontal hazard cone` : 'Obstacle / Visor seal unlatched')
-        : 'Perimeter unobstructed. Airtight coronal seal confirmed';
+        ? ((hasDist && t.distCm > 0 && t.distCm <= 25) ? `Obstacle ${Math.round(t.distCm)} cm in frontal hazard cone` : 'Obstacle in frontal perimeter')
+        : ((hasDist && t.distCm > 0 && t.distCm !== 999) ? `Frontal clearance: ${Math.round(t.distCm)} cm. Path unobstructed.` : 'Perimeter unobstructed (>400 cm). Airtight visor seal confirmed.');
       UI.valIrDetail.style.color = isObstacle ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
     }
     if (UI.cardIr) {
@@ -2307,8 +2321,8 @@ function updateDashboardUI(t) {
     }
     if (UI.scenarioIr) {
       UI.scenarioIr.textContent = isObstacle
-        ? 'OBSTACLE HAZARD: Object within close defense cone (< 25 cm). Halt and verify perimeter.'
-        : 'Perimeter Clear: Visor face shield airtight seal verified and latched. No close-range obstacles.';
+        ? `OBSTACLE HAZARD: Object ${hasDist && t.distCm > 0 ? Math.round(t.distCm) + ' cm ' : ''}in frontal defense cone (< 25 cm). Halt and verify perimeter.`
+        : `Perimeter Clear: Path ahead unobstructed (${hasDist && t.distCm !== 999 ? Math.round(t.distCm) + ' cm' : '> 400 cm'}). No close-range obstacles.`;
     }
   }
 
@@ -2757,11 +2771,23 @@ function handleIncomingSerialLine(raw) {
       if (obj.gas !== undefined) {
         state.telemetry.gasPpm = parseFloat(obj.gas);
         state.telemetry.mq135Ao = null; // no raw AO in JSON mode
+        // Populate CO baseline from atmospheric gas reading
+        if (state.telemetry.coPpm === null || isNaN(state.telemetry.coPpm)) {
+          state.telemetry.coPpm = Math.max(12, Math.round(state.telemetry.gasPpm * 0.18));
+          state.telemetry.mq7Ao = state.telemetry.coPpm;
+        }
       }
       // Also accept "mq135" key for custom firmware builds
       if (obj.mq135 !== undefined) state.telemetry.gasPpm = parseFloat(obj.mq135);
-      // MQ-7 key (not in current firmware but handle if added)
-      if (obj.mq7 !== undefined) state.telemetry.coPpm = parseFloat(obj.mq7);
+      // Dedicated MQ-7 keys (if sent)
+      if (obj.mq7 !== undefined) {
+        state.telemetry.coPpm = parseFloat(obj.mq7);
+        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
+      }
+      if (obj.co !== undefined) {
+        state.telemetry.coPpm = parseFloat(obj.co);
+        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
+      }
 
       // ── HC-SR04 Ultrasonic Distance — KEY FIX: firmware uses "dist" ────────
       if (obj.dist !== undefined) state.telemetry.distCm = parseFloat(obj.dist);

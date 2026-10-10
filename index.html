@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -247,15 +247,15 @@
         <div class="widget-top-row">
           <div class="widget-badge-wrap">
             <span class="apple-status-dot" id="dot-ir"></span>
-            <span class="sensor-chip">IR SENSOR</span>
+            <span class="sensor-chip">HC-SR04 / PROXIMITY</span>
           </div>
           <span class="badge-status standby" id="pill-ir">STANDBY</span>
         </div>
 
         <div class="widget-title-row">
           <div class="widget-title-group">
-            <h3 class="widget-main-title">VISOR PROXIMITY &amp; SEAL</h3>
-            <span class="widget-sub-title">Optical Coronal Defense Latch</span>
+            <h3 class="widget-main-title">VISOR PROXIMITY &amp; RANGE</h3>
+            <span class="widget-sub-title">Ultrasonic Obstacle Defense Cone</span>
           </div>
           <div class="widget-headline-val">
             <span class="metric-compact no-data" id="val-ir">—</span>
@@ -266,18 +266,27 @@
           Awaiting live USB telemetry packet stream from ESP32.
         </div>
 
+        <div class="threshold-track">
+          <div class="threshold-bar safe" id="bar-dist" style="width: 100%;"></div>
+        </div>
+        <div class="threshold-scale">
+          <span class="scale-item danger">&lt;25 CM HAZARD</span>
+          <span class="scale-item warn">25–100 CM</span>
+          <span class="scale-item safe">&gt;100 CM CLEAR</span>
+        </div>
+
         <div class="widget-depth-drawer">
           <p class="sensor-description">
-            940nm active infrared phototransistor monitoring front face shield airtight seal latch and close-quarters obstacle proximity.
+            Dual transducer ultrasonic pulse timer measuring obstacle distance in real-time centimeters and front face shield perimeter clearance.
           </p>
 
           <div class="drawer-protocol-box">
             <div class="proto-row">
-              <span class="proto-lbl">DETECTION CONE:</span>
-              <span class="proto-val">940nm Infrared (15 cm range)</span>
+              <span class="proto-lbl">DETECTION RANGE:</span>
+              <span class="proto-val">2 cm to 400 cm (±3mm)</span>
             </div>
             <div class="proto-row">
-              <span class="proto-lbl">STATUS:</span>
+              <span class="proto-lbl">TACTICAL STATUS:</span>
               <span class="proto-val" id="val-ir-detail">Awaiting Signal</span>
             </div>
           </div>

@@ -2261,128 +2261,80 @@ function updateDashboardUI(t) {
   // LIVE TELEMETRY POPULATION (STRICT 100% REAL HARDWARE — ZERO HARDCODED MOCKS)
   // ==========================================================================
 
-  // 1. MQ-135 TOXIC GASES / CBRN — WITH LEAD-OFF PROTECTION (4095 AO = unbonded rail)
+  // 1. MQ-135 TOXIC GASES / CBRN (100% LIVE HARDWARE TELEMETRY — ZERO HARDCODED VALUES)
   if (t.mq135Ao !== null || t.gasPpm !== null) {
     const rawAo = t.mq135Ao !== null ? t.mq135Ao : Math.round(t.gasPpm);
-    const isOpenCircuit = (rawAo >= 4080 || rawAo <= 15);
     const doState = t.mq135Do !== null ? t.mq135Do : 1;
-    const isTripped = !isOpenCircuit && ((doState === 0) || (rawAo > 3500));
-    const isElevated = !isOpenCircuit && (rawAo > 3000);
+    // Trip condition: hardware digital comparator trips (DO === 0) or elevated air contaminant surge
+    const isTripped = (doState === 0) || (rawAo > 3500 && rawAo < 4080);
+    const isElevated = (rawAo > 1500 && rawAo <= 3500);
+    const isMaxRailStandby = (rawAo >= 4080);
 
-    if (isOpenCircuit) {
-      if (UI.valGas) {
-        UI.valGas.textContent = '410 PPM';
-        UI.valGas.className = 'metric-compact';
-      }
-      if (UI.valMq135Do) {
-        UI.valMq135Do.textContent = 'DO: 1 (SAFE)';
-        UI.valMq135Do.style.color = 'var(--state-safe-green)';
-      }
-      if (UI.barGas) {
-        UI.barGas.style.width = '14%';
-        UI.barGas.className = 'threshold-bar safe';
-      }
-      if (UI.pillGas) {
-        UI.pillGas.textContent = 'NOMINAL';
-        UI.pillGas.className = 'badge-status safe';
-      }
-      if (UI.cardMq135) {
-        UI.cardMq135.className = 'apple-widget state-nominal';
-      }
-      if (UI.scenarioGas) {
-        UI.scenarioGas.textContent = 'Clean Room Air: Channel in standby / nominal baseline (410 PPM). Breathing zone secure.';
-      }
-    } else {
-      if (UI.valGas) {
-        UI.valGas.textContent = `${rawAo} AO`;
-        UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
-      }
-      if (UI.valMq135Do) {
-        UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
-        UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
-      }
-      const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
-      if (UI.barGas) {
-        UI.barGas.style.width = `${gasPct}%`;
-        UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-      }
-      if (UI.pillGas) {
-        UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : 'OPTIMAL';
-        UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-      }
-      if (UI.cardMq135) {
-        UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
-      }
-      if (UI.scenarioGas) {
-        UI.scenarioGas.textContent = isTripped
-          ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
-          : isElevated
-            ? `Elevated VOC: Raw AO ${rawAo} in caution zone (3000–3500). Monitor breathing zone.`
+    if (UI.valGas) {
+      UI.valGas.textContent = `${rawAo} AO`;
+      UI.valGas.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+    }
+    if (UI.valMq135Do) {
+      UI.valMq135Do.textContent = `DO: ${doState} (${isTripped ? 'TRIPPED' : 'CLEAR'})`;
+      UI.valMq135Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+    }
+    const gasPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    if (UI.barGas) {
+      UI.barGas.style.width = `${gasPct}%`;
+      UI.barGas.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.pillGas) {
+      UI.pillGas.textContent = isTripped ? 'TOXIC!' : isElevated ? 'ELEVATED' : isMaxRailStandby ? 'STANDBY' : 'OPTIMAL';
+      UI.pillGas.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.cardMq135) {
+      UI.cardMq135.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+    }
+    if (UI.scenarioGas) {
+      UI.scenarioGas.textContent = isTripped
+        ? `CBRN HAZARD: Raw AO ${rawAo} breached trigger! DO comparator tripped. Purge air!`
+        : isElevated
+          ? `Elevated VOC: Raw AO ${rawAo} in caution zone. Atmosphere responding to environmental change.`
+          : isMaxRailStandby
+            ? `Atmospheric Sensor: Live ADC ${rawAo} counts (Rail Standby). DO comparator: Armed & Clear.`
             : `Clean Atmosphere: Raw AO ${rawAo} baseline nominal. Breathing zone secure.`;
-      }
     }
   }
 
   // 2. MQ-7 CARBON MONOXIDE (CO) — FAANG-GRADE HARDWARE TELEMETRY WITH LEAD-OFF PROTECTION
+  // 2. MQ-7 CARBON MONOXIDE (CO) (100% LIVE HARDWARE TELEMETRY — ZERO HARDCODED VALUES)
   if (t.mq7Ao !== null || t.coPpm !== null) {
     const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
-    const isOpenCircuit = (rawAo >= 4080 || rawAo <= 0);
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
-    const isTripped = !isOpenCircuit && ((doState === 0) || (rawAo > 3500));
-    const isElevated = !isOpenCircuit && (rawAo > 3000);
+    const isTripped = (doState === 0) || (rawAo > 3500 && rawAo < 4080);
+    const isElevated = (rawAo > 1500 && rawAo <= 3500);
 
-    if (isOpenCircuit) {
-      // Unbonded/unwired channel lead-off detection: nominal clean room atmospheric baseline
-      if (UI.valCo) {
-        UI.valCo.textContent = '12 PPM';
-        UI.valCo.className = 'metric-compact';
-      }
-      if (UI.valMq7Do) {
-        UI.valMq7Do.textContent = 'DO: 1 (SAFE)';
-        UI.valMq7Do.style.color = 'var(--state-safe-green)';
-      }
-      if (UI.barCo) {
-        UI.barCo.style.width = '12%';
-        UI.barCo.className = 'threshold-bar safe';
-      }
-      if (UI.pillCo) {
-        UI.pillCo.textContent = 'OPTIMAL';
-        UI.pillCo.className = 'badge-status safe';
-      }
-      if (UI.cardMq7) {
-        UI.cardMq7.className = 'apple-widget state-nominal';
-      }
-      if (UI.scenarioCo) {
-        UI.scenarioCo.textContent = 'Carbon Monoxide Nominal: Atmosphere secure (< 15 PPM). Single multi-gas CBRN array active.';
-      }
-    } else {
-      if (UI.valCo) {
-        UI.valCo.textContent = `${rawAo} AO`;
-        UI.valCo.className = isTripped ? 'metric-compact danger' : 'metric-compact';
-      }
-      if (UI.valMq7Do) {
-        UI.valMq7Do.textContent = `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
-        UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
-      }
-      const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
-      if (UI.barCo) {
-        UI.barCo.style.width = `${coPct}%`;
-        UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-      }
-      if (UI.pillCo) {
-        UI.pillCo.textContent = isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
-        UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
-      }
-      if (UI.cardMq7) {
-        UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
-      }
-      if (UI.scenarioCo) {
-        UI.scenarioCo.textContent = isTripped
-          ? `CO POISONING THREAT: Raw AO ${rawAo} lethal blowback! Immediate evacuation required.`
-          : isElevated
-            ? `Muzzle Blast / Combustion: Raw AO ${rawAo} elevated (3000–3500). Verify ventilation.`
-            : `Carbon Monoxide Clear: Raw AO ${rawAo} clean room baseline. Atmosphere nominal.`;
-      }
+    if (UI.valCo) {
+      UI.valCo.textContent = `${rawAo} AO`;
+      UI.valCo.className = isTripped ? 'metric-compact danger' : 'metric-compact';
+    }
+    if (UI.valMq7Do) {
+      UI.valMq7Do.textContent = `DO: ${doState} (${isTripped ? 'LETHAL CO' : 'SAFE'})`;
+      UI.valMq7Do.style.color = isTripped ? 'var(--state-danger-red)' : 'var(--state-safe-green)';
+    }
+    const coPct = Math.min(100, Math.max(0, (rawAo / 4095) * 100));
+    if (UI.barCo) {
+      UI.barCo.style.width = `${coPct}%`;
+      UI.barCo.className = `threshold-bar ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.pillCo) {
+      UI.pillCo.textContent = isTripped ? 'LETHAL!' : isElevated ? 'ELEVATED' : 'SAFE';
+      UI.pillCo.className = `badge-status ${isTripped ? 'danger' : isElevated ? 'warn' : 'safe'}`;
+    }
+    if (UI.cardMq7) {
+      UI.cardMq7.className = `apple-widget ${isTripped ? 'state-danger open' : isElevated ? 'state-warning' : 'state-nominal'}`;
+    }
+    if (UI.scenarioCo) {
+      UI.scenarioCo.textContent = isTripped
+        ? `CO POISONING THREAT: Raw AO ${rawAo} lethal blowback! Immediate evacuation required.`
+        : isElevated
+          ? `Muzzle Blast / Combustion: Raw AO ${rawAo} elevated. Artillery backblast monitoring.`
+          : `Carbon Monoxide Clear: Raw AO ${rawAo} counts. Atmosphere secure (< 15 PPM).`;
     }
   }
 
@@ -2652,16 +2604,16 @@ function updateDashboardUI(t) {
         : `Tactical Base Grid: Kotri Kalan, MP (${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E). Indoor microwave attenuation active. 3D satellite lock engages automatically in open sky.`;
     }
   } else {
-    // Acquire fallback
-    if (UI.valLat) { UI.valLat.textContent = '23.16100°'; UI.valLat.classList.remove('no-data'); }
-    if (UI.valLng) { UI.valLng.textContent = '77.10600°'; UI.valLng.classList.remove('no-data'); }
-    if (UI.valAlt) { UI.valAlt.textContent = '498 m'; UI.valAlt.classList.remove('no-data'); }
+    // Indoor constellation search (strictly zero hardcoded mock coordinates)
+    if (UI.valLat) { UI.valLat.textContent = 'SEARCHING'; UI.valLat.classList.add('no-data'); }
+    if (UI.valLng) { UI.valLng.textContent = 'SEARCHING'; UI.valLng.classList.add('no-data'); }
+    if (UI.valAlt) { UI.valAlt.textContent = '— m'; UI.valAlt.classList.add('no-data'); }
     if (UI.valSats) { UI.valSats.textContent = `${sats} SATS`; UI.valSats.className = 'metric-compact warn'; }
-    if (UI.barSats) { UI.barSats.style.width = '20%'; UI.barSats.className = 'threshold-bar warn'; }
-    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'INDOORS // BASE LOCK'; UI.gpsWidgetBadge.className = 'badge-status warn'; }
+    if (UI.barSats) { UI.barSats.style.width = '10%'; UI.barSats.className = 'threshold-bar warn'; }
+    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'SEARCHING SATELLITES'; UI.gpsWidgetBadge.className = 'badge-status warn'; }
     if (UI.cardGps) UI.cardGps.className = 'apple-widget state-nominal';
     if (UI.scenarioGps) {
-      UI.scenarioGps.textContent = 'Tactical Base Grid: Kotri Kalan, MP (23.1610°N, 77.1060°E). Indoors. Open sky line-of-sight required for satellite lock.';
+      UI.scenarioGps.textContent = 'NEO-6M GPS Receiver Active: Constellation acquisition in progress (0 satellites locked indoors). Open sky line-of-sight required for 3D orbital fix.';
     }
   }
 

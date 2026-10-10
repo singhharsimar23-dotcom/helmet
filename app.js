@@ -387,7 +387,12 @@ function triggerObstacleAlarm(active) {
     if (!_obstacleBuzzerInterval) {
       playTacticalBuzzerSound();
       _obstacleBuzzerInterval = setInterval(() => {
-        if (state.telemetry.obstacle === 1 || (state.telemetry.irStatus && state.telemetry.irStatus.includes('OBSTACLE'))) {
+        // Unified obstacle check: IR flag, obstacle field, OR close distance (≤25cm)
+        const t = state.telemetry;
+        const stillObstacle = (t.obstacle === 1) ||
+                              (t.irStatus && t.irStatus.includes('OBSTACLE')) ||
+                              (t.distCm !== null && !isNaN(t.distCm) && t.distCm > 0 && t.distCm <= 25);
+        if (stillObstacle) {
           playTacticalBuzzerSound();
         } else {
           stopObstacleAlarm();
@@ -2643,9 +2648,11 @@ function updateDashboardUI(t) {
   }
 
   // 10. IR PROXIMITY → BUZZER (send serial command & acoustic pulse when obstacle state changes)
+  //     Fires on: ir=1 OR obstacle=1 OR distCm <= 25 (all three sensor paths)
   //     Only fires when NOT in SOS mode (SOS buzzer takes priority)
   const _isObstacleNow = (t.irStatus && t.irStatus.includes('OBSTACLE')) ||
-                         (t.obstacle === 1 || t.obstacle === true);
+                         (t.obstacle === 1) ||
+                         (t.distCm !== null && !isNaN(t.distCm) && t.distCm > 0 && t.distCm <= 25);
   if (!t.sos) {
     if (_isObstacleNow && !state._lastIrBuzzerOn) {
       state._lastIrBuzzerOn = true;
@@ -2824,25 +2831,26 @@ function handleIncomingSerialLine(raw) {
       if (obj.ay !== undefined) state.telemetry.ay = parseFloat(obj.ay);
       if (obj.az !== undefined) state.telemetry.az = parseFloat(obj.az);
 
-      // Redundant fallback: If roll and pitch are exactly zero or null, but ax/ay/az are present, compute dynamically
-      if ((state.telemetry.pitch === 0 && state.telemetry.roll === 0) || state.telemetry.pitch === null) {
-        if (state.telemetry.ax !== null && state.telemetry.az !== null) {
-          const ax = state.telemetry.ax;
-          const ay = state.telemetry.ay || 0;
-          const az = state.telemetry.az || 1;
-          state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * 57.2958;
-          state.telemetry.roll  = Math.atan2(ay, az) * 57.2958;
-        }
+      // NOTE: Do NOT attempt to compute pitch/roll from ax/ay/az here.
+      // The firmware sends pre-computed complementary-filter pitch/roll directly.
+      // Overwriting them from raw accel when pitch==0 is WRONG — level = valid 0°.
+      // Fallback only if pitch was never received at all (still null after JSON parse).
+      if (state.telemetry.pitch === null && state.telemetry.ax !== null && state.telemetry.az !== null) {
+        const ax = state.telemetry.ax;
+        const ay = state.telemetry.ay || 0;
+        const az = state.telemetry.az || 1;
+        state.telemetry.pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * 57.2958;
+        state.telemetry.roll  = Math.atan2(ay, az) * 57.2958;
       }
 
-      // ── GYRO LIVE: stamp timestamp only when pitch is a valid non-fault reading ──
-      // Detect I2C fault via JSON: if ax=ay=az=0 AND gforce=0, sensor is dead
+      // ── GYRO LIVE: stamp timestamp whenever we receive valid (non-fault) IMU data ──
+      // Detect I2C fault: all axes AND gforce exactly 0 means MPU-6050 not responding
       const jsonI2CFault = (
         state.telemetry.gforce === 0 &&
         state.telemetry.ax === 0 && state.telemetry.ay === 0 && state.telemetry.az === 0
       );
-      if (!jsonI2CFault && state.telemetry.pitch !== null && !isNaN(state.telemetry.pitch) &&
-          Math.abs(state.telemetry.pitch) > 0.01) {
+      // Accept pitch=0 as valid (helmet sitting level is a real reading, not a fault)
+      if (!jsonI2CFault && state.telemetry.pitch !== null && !isNaN(state.telemetry.pitch)) {
         state.three.gyroLastUpdate = Date.now();
         if (!state.three.gyroInitialized) {
           state.three.smoothPitch  = state.telemetry.pitch - (state.telemetry.tarePitch || 0);
@@ -2906,25 +2914,39 @@ function handleIncomingSerialLine(raw) {
       if (obj.sos     !== undefined) state.telemetry.sos     = Boolean(parseInt(obj.sos, 10));
 
       // ── Legacy / custom keys ────────────────────────────────────────────────
-      if (obj.ir !== undefined) state.telemetry.irStatus = obj.ir ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+      // IR sensor: firmware sends ir=0 (clear) or ir=1 (obstacle). Obstacle field mirrors it.
+      if (obj.ir !== undefined) {
+        const irObstacle = (obj.ir === 1 || obj.ir === true);
+        state.telemetry.irStatus = irObstacle ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+      }
       if (obj.obstacle !== undefined) {
-        state.telemetry.obstacle = obj.obstacle;
-        state.telemetry.irStatus = (obj.obstacle === 1 || obj.obstacle === true) ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
+        state.telemetry.obstacle = parseInt(obj.obstacle, 10);
+        const obsDetected = (state.telemetry.obstacle === 1);
+        state.telemetry.irStatus = obsDetected ? 'OBSTACLE DETECTED' : 'SEALED & CLEAR';
       }
       if (obj.gps_status !== undefined) {
         state.telemetry.gpsStatus = obj.gps_status;
         if (obj.gps_status === 'SEARCHING') {
           state.telemetry.gps = 'SEARCHING SATS';
+        } else if (obj.gps_status === 'INDOOR_BASE_LOCK' || obj.gps_status === 'ACQUIRING') {
+          state.telemetry.gps = 'INDOOR BASE LOCK';
         }
       }
       if (obj.buzzer !== undefined) {
         state.telemetry.buzzer = obj.buzzer ? 'ACTIVE' : 'OFF';
       }
 
-      // Update GPS status pill from parsed lat/lng
-      if (state.telemetry.lat !== null && state.telemetry.lng !== null && (state.telemetry.lat !== 0 || state.telemetry.lng !== 0)) {
-        state.telemetry.gps = `${state.telemetry.lat.toFixed(5)}°N, ${state.telemetry.lng.toFixed(5)}°E`;
-      } else if (state.telemetry.gpsStatus === 'NO_FIX_INDOORS' || (state.telemetry.lat === 0 && state.telemetry.lng === 0)) {
+      // Update GPS status pill from parsed lat/lng (base coords from Kotri Kalan are valid)
+      if (state.telemetry.lat !== null && state.telemetry.lng !== null &&
+          !isNaN(state.telemetry.lat) && !isNaN(state.telemetry.lng) &&
+          (state.telemetry.lat !== 0 || state.telemetry.lng !== 0)) {
+        if (state.telemetry.gpsStatus === '3D_FIX') {
+          state.telemetry.gps = `${state.telemetry.lat.toFixed(5)}°N, ${state.telemetry.lng.toFixed(5)}°E`;
+        } else {
+          // Indoor base anchor (Kotri Kalan) — label it clearly
+          state.telemetry.gps = 'INDOOR BASE LOCK';
+        }
+      } else if (state.telemetry.lat === 0 && state.telemetry.lng === 0) {
         state.telemetry.gps = 'INDOORS (0 SATS)';
       }
 

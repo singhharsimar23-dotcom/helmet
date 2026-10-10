@@ -200,41 +200,31 @@ void loop() {
 }
 
 // ============================================================================
-// BUZZER CONTROLLER (PWM HARDWARE TIMER — AUDIBLE ON ALL ACTIVE & PASSIVE TRANSDUCERS)
+// BUZZER CONTROLLER (CLEAN DIGITAL DRIVE — AUDIBLE ON ACTIVE BUZZERS)
 // ============================================================================
-#define BUZZER_PWM_CHANNEL  0
-#define BUZZER_FREQ_HZ      2400
-#define BUZZER_RESOLUTION   8
-
 void initBuzzer() {
-  ledcSetup(BUZZER_PWM_CHANNEL, BUZZER_FREQ_HZ, BUZZER_RESOLUTION);
-  ledcAttachPin(PIN_BUZZER, BUZZER_PWM_CHANNEL);
-  ledcWrite(BUZZER_PWM_CHANNEL, 0); // Start silent
+  pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_BUZZER, LOW); // Start silent
 }
 
 void setBuzzer(bool on) {
   buzzerState = on;
-  if (on) {
-    ledcWrite(BUZZER_PWM_CHANNEL, 128); // 50% duty cycle 2.4kHz acoustic drive!
-  } else {
-    ledcWrite(BUZZER_PWM_CHANNEL, 0);   // Silent
-  }
+  digitalWrite(PIN_BUZZER, on ? HIGH : LOW);
 }
 
 void chirpBuzzer(int pulses, int durationMs, int gapMs) {
   for (int i = 0; i < pulses; i++) {
-    setBuzzer(true);
+    digitalWrite(PIN_BUZZER, HIGH);
     delay(durationMs);
-    setBuzzer(false);
+    digitalWrite(PIN_BUZZER, LOW);
     if (i < pulses - 1) delay(gapMs);
   }
 }
 
 // ============================================================================
-// PROXIMITY SENSOR (ADAPTIVE DUAL-PROBE: ULTRASONIC PULSE + DIGITAL IR REFLECTION)
+// PROXIMITY SENSOR (SIMPLE OBSTACLE DETECTOR — BEEP ON OBSTACLE)
 // ============================================================================
 unsigned long lastProxPingMs = 0;
-bool irSensorLatched = false;
 
 float measureUltrasonicPulse(int trigPin, int echoPin) {
   pinMode(trigPin, OUTPUT);
@@ -246,69 +236,55 @@ float measureUltrasonicPulse(int trigPin, int echoPin) {
 
   pinMode(echoPin, INPUT);
   long dur = pulseIn(echoPin, HIGH, 30000); // 30ms timeout (~5.1m max)
-  // Minimum valid travel time for sound (> 3.5cm) is 210µs.
-  // Reject electrical cross-talk / transducer direct ringing (< 210µs)
   if (dur < 210 || dur > 24000) return -1.0f;
   return (dur * 0.0343f) / 2.0f;
 }
 
 void readProximitySensor() {
   unsigned long now = millis();
-  if (now - lastProxPingMs < 60) return; // 60ms cadence
+  if (now - lastProxPingMs < 40) return; // 40ms responsive cadence
   lastProxPingMs = now;
 
-  // 1. Try Ultrasonic Pulse Measurement on standard pins (TRIG=5, ECHO=18)
-  float dist = measureUltrasonicPulse(PIN_TRIG, PIN_ECHO);
+  // 1. Digital IR Obstacle Sensor (FC-51 / TCRT5000):
+  // When hand is in front, the sensor's RED LED turns ON and its OUT line pulls to LOW (0V)!
+  pinMode(PIN_ECHO, INPUT_PULLUP);
+  pinMode(PIN_TRIG, INPUT_PULLUP);
+  int rawEcho = digitalRead(PIN_ECHO);
+  int rawTrig = digitalRead(PIN_TRIG);
 
-  // 2. If no echo, try reverse wiring (TRIG=18, ECHO=5)
-  if (dist <= 0.0f) {
-    float distRev = measureUltrasonicPulse(PIN_ECHO, PIN_TRIG);
-    if (distRev > 0.0f) dist = distRev;
+  bool isObstacle = (rawEcho == LOW || rawTrig == LOW);
+
+  // 2. Also check ultrasonic echo if an HC-SR04 is used instead
+  if (!isObstacle) {
+    float dist = measureUltrasonicPulse(PIN_TRIG, PIN_ECHO);
+    if (dist <= 0.0f) {
+      dist = measureUltrasonicPulse(PIN_ECHO, PIN_TRIG);
+    }
+    if (dist >= 3.0f && dist <= 25.0f) {
+      isObstacle = true;
+      currentDistCm = dist;
+    }
   }
 
-  // Restore standard pin modes
-  pinMode(PIN_TRIG, OUTPUT);
-  digitalWrite(PIN_TRIG, LOW);
-  pinMode(PIN_ECHO, INPUT_PULLUP);
-
-  if (dist >= 3.5f && dist <= 400.0f) {
-    // Genuine HC-SR04 ultrasonic echo pulse returned!
-    currentDistCm = dist;
-    obstacleDetected = (dist <= 25.0f);
+  if (isObstacle) {
+    obstacleDetected = true;
+    if (currentDistCm <= 0.0f) currentDistCm = 10.0f;
   } else {
-    // Ultrasonic returned no obstacle in range.
-    // Check if an Active Infrared Obstacle Sensor (FC-51 / TCRT5000) is connected on PIN_ECHO:
-    // With pull-up enabled, an idle IR obstacle sensor rests at HIGH when clear.
-    // When a hand or object is placed in front (< 15 cm), its comparator pulls the pin LOW!
-    int rawEcho = digitalRead(PIN_ECHO);
-
-    if (rawEcho == HIGH) {
-      // Confirmed active IR sensor outputting HIGH (CLEAR state)
-      irSensorLatched = true;
-    }
-
-    if (irSensorLatched && rawEcho == LOW) {
-      // Active IR sensor detected obstacle in front!
-      currentDistCm = 15.0f; // 15 cm optical detection cone
-      obstacleDetected = true;
-    } else {
-      // Clear path ahead!
-      currentDistCm = -1.0f;
-      obstacleDetected = false;
-    }
+    obstacleDetected = false;
+    currentDistCm = -1.0f;
   }
 
   // --- BUZZER CONTROL ---
-  // SILENT on clear air. Chirps ONLY when an obstacle is genuinely within hazard zone (< 25cm)!
+  // Beeps loudly whenever an obstacle/hand is detected! Silent when clear.
   if (obstacleDetected && !isDistressActive) {
-    if (now - lastObstacleBuzzMs >= 300) {
+    if (now - lastObstacleBuzzMs >= 250) {
       lastObstacleBuzzMs = now;
-      setBuzzer(true);
-    } else if (now - lastObstacleBuzzMs >= 80 && buzzerState) {
-      setBuzzer(false);
+      digitalWrite(PIN_BUZZER, HIGH);
+    } else if (now - lastObstacleBuzzMs >= 120) {
+      digitalWrite(PIN_BUZZER, LOW);
     }
-  } else if (!isDistressActive && buzzerState) {
-    setBuzzer(false);
+  } else if (!isDistressActive && !buzzerState) {
+    digitalWrite(PIN_BUZZER, LOW);
   }
 }
 
@@ -484,13 +460,12 @@ void readAndTransmitTelemetry() {
     roll = simRoll; pitch = simPitch;
   }
 
-  // 2. REAL ANALOG READINGS (MQ-135 Gas & MQ-7 CO) — ZERO HARDCODED SINE WAVES
+  // 2. REAL ANALOG READINGS (MQ-135 Gas & MQ-9 CO / Combustible) — ZERO HARDCODED SINE WAVES
   int rawGas = analogRead(PIN_GAS_ANALOG); // GPIO 34
   int rawCo  = analogRead(PIN_CO_ANALOG);  // GPIO 35
 
-  // Open-Circuit Lead-Off Filter:
-  // If GPIO 35 has no wire connected (reads 4095 or 0), flag as -1 (Unconnected Probe)
-  int reportedCo = (rawCo > 25 && rawCo < 4080) ? rawCo : -1;
+  // Genuine Hardware Telemetry: Transmit actual raw ADC reading from MQ-9 (GPIO 35)
+  int reportedCo = rawCo;
 
   // 3. Proximity / Ultrasonic Distance
   int distVal = (currentDistCm > 0.0f) ? (int)currentDistCm : 999;
@@ -595,10 +570,23 @@ void handleIncomingCommands() {
     } else if (cmd == "STATUS") {
       Serial.print("[STATUS] MPU:"); Serial.print(mpuFound ? "OK" : "ABSENT");
       Serial.print(" | GPS:"); Serial.print(gpsHardwareAlive ? (gpsHasFix ? "3D_FIX" : "SEARCHING") : "NO_UART");
-      Serial.print(" | PROX:"); Serial.println(obstacleDetected ? "OBSTACLE" : "CLEAR");
+      Serial.print(" | PROX:"); Serial.print(obstacleDetected ? "OBSTACLE" : "CLEAR");
+      Serial.print(" (ECHO18="); Serial.print(digitalRead(PIN_ECHO));
+      Serial.print(",TRIG5="); Serial.print(digitalRead(PIN_TRIG)); Serial.print(")");
+      Serial.print(" | MQ135:"); Serial.print(analogRead(PIN_GAS_ANALOG));
+      Serial.print(" | MQ9:"); Serial.println(analogRead(PIN_CO_ANALOG));
     } else if (cmd == "BUZZ" || cmd == "BUZZER_ON") {
-      chirpBuzzer(1, 120, 0);
-      Serial.println("[ACK] BUZZER PULSED");
+      digitalWrite(PIN_BUZZER, HIGH);
+      delay(800);
+      digitalWrite(PIN_BUZZER, LOW);
+      Serial.println("[ACK] BUZZER PULSED 800MS (PIN 23)");
+    } else if (cmd.startsWith("BUZZ_PIN:")) {
+      int testPin = cmd.substring(9).toInt();
+      pinMode(testPin, OUTPUT);
+      digitalWrite(testPin, HIGH);
+      delay(800);
+      digitalWrite(testPin, LOW);
+      Serial.print("[ACK] TESTED PIN "); Serial.println(testPin);
     } else if (cmd == "BUZZER_OFF") {
       isDistressActive = false;
       setBuzzer(false);
@@ -655,8 +643,8 @@ void handleIncomingCommands() {
       } else {
         int eLvl = digitalRead(PIN_ECHO);
         Serial.print("ECHO GPIO 18 DC LEVEL: ");
-        Serial.print(eLvl == HIGH ? "HIGH (CLEAR)" : "LOW (OBSTACLE / IDLE)");
-        Serial.println(irSensorLatched ? " | ACTIVE IR SENSOR ENGAGED" : " | ULTRASONIC STANDBY (>400cm)");
+        Serial.print(eLvl == HIGH ? "HIGH" : "LOW (IDLE)");
+        Serial.println(" | ULTRASONIC CLEAR / STANDBY (>400cm)");
       }
       Serial.println("==================================================\n");
     } else if (cmd == "GPS") {

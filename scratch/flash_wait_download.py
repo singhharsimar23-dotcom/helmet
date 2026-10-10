@@ -31,7 +31,7 @@ print("=" * 60, flush=True)
 print("LISTENING FOR DOWNLOAD MODE (HOLD IO0 -> TAP EN -> RELEASE IO0)...", flush=True)
 print("=" * 60, flush=True)
 
-for attempt in range(1, 40):
+for attempt in range(1, 61):
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode == 0:
         print("\n" + "=" * 60, flush=True)
@@ -40,9 +40,9 @@ for attempt in range(1, 40):
         print(res.stdout, flush=True)
         sys.exit(0)
     elif "Wrong boot mode detected" in res.stderr:
-        print(f"[{attempt}/40] Chip is running in normal mode (0x17). Please HOLD IO0 and TAP EN now...", flush=True)
+        print(f"[{attempt}/60] Chip is in normal mode. Please HOLD IO0 and TAP EN now...", flush=True)
     else:
-        print(f"[{attempt}/40] Waiting for download mode on {PORT}...", flush=True)
+        print(f"[{attempt}/60] Waiting for download mode on {PORT}...", flush=True)
     time.sleep(1)
 
 print("Timeout waiting for download mode.", flush=True)

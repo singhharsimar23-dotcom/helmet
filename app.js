@@ -2236,9 +2236,9 @@ function updateDashboardUI(t) {
     }
   }
 
-  // 2. MQ-7 CARBON MONOXIDE (CO)
-  if (t.mq7Ao !== null || t.coPpm !== null || t.gasPpm !== null) {
-    const rawAo = t.mq7Ao !== null ? t.mq7Ao : (t.coPpm !== null ? Math.round(t.coPpm) : Math.max(12, Math.round(t.gasPpm * 0.18)));
+  // 2. MQ-7 CARBON MONOXIDE (CO) — 100% REAL HARDWARE READING (GPIO 35)
+  if (t.mq7Ao !== null || t.coPpm !== null) {
+    const rawAo = t.mq7Ao !== null ? t.mq7Ao : Math.round(t.coPpm);
     const doState = t.mq7Do !== null ? t.mq7Do : 1;
     const isTripped = (doState === 0) || (rawAo > 3500);
     const isElevated = rawAo > 3000;
@@ -2508,17 +2508,16 @@ function updateDashboardUI(t) {
   if (t.buzzer && UI.valBuzzer) UI.valBuzzer.textContent = t.buzzer;
   if (t.oledPage !== null && UI.valOled) UI.valOled.textContent = `PAGE ${t.oledPage}`;
 
-  // 8. GPS GEOLOCATION WIDGET
-  const hasGpsFix = t.lat !== null && t.lng !== null && !isNaN(t.lat) && !isNaN(t.lng);
-  const hasGpsText = t.gps && t.gps !== 'STANDBY';
+  // 8. GPS GEOLOCATION WIDGET — 100% HONEST HARDWARE TELEMETRY
+  const hasRealFix = t.lat !== null && t.lng !== null && !isNaN(t.lat) && !isNaN(t.lng) && (t.lat !== 0.0 || t.lng !== 0.0);
+  const sats = t.sats !== null ? t.sats : 0;
 
-  if (hasGpsFix) {
-    // Full coordinate fix from JSON
+  if (hasRealFix) {
+    // Full coordinate fix from genuine satellite triangulation
     if (UI.valLat) { UI.valLat.textContent = `${t.lat.toFixed(5)}°`; UI.valLat.classList.remove('no-data'); }
     if (UI.valLng) { UI.valLng.textContent = `${t.lng.toFixed(5)}°`; UI.valLng.classList.remove('no-data'); }
     if (UI.valAlt) { UI.valAlt.textContent = t.alt !== null ? `${t.alt.toFixed(0)} m` : '— m'; UI.valAlt.classList.remove('no-data'); }
 
-    const sats = t.sats !== null ? t.sats : 0;
     if (UI.valSats) { UI.valSats.textContent = `${sats} SAT`; UI.valSats.className = 'metric-compact'; }
     const satPct = Math.min(100, Math.max(0, (sats / 12) * 100));
     if (UI.barSats) {
@@ -2532,14 +2531,27 @@ function updateDashboardUI(t) {
     if (UI.scenarioGps) {
       UI.scenarioGps.textContent = `Position Fix: ${t.lat.toFixed(5)}°N, ${t.lng.toFixed(5)}°E — ${sats} satellites locked. ${fixQuality}.`;
     }
-  } else if (t.gpsStatus === 'SEARCHING' || hasGpsText) {
-    // GPS active on UART2, acquiring satellite constellation
-    const sats = t.sats !== null ? t.sats : 0;
-    if (UI.gpsWidgetBadge) { UI.gpsWidgetBadge.textContent = 'ACQUIRING FIX'; UI.gpsWidgetBadge.className = 'badge-status warn'; }
-    if (UI.cardGps) UI.cardGps.className = 'apple-widget state-warning';
+  } else {
+    // Satellite microwave reception blocked indoors or searching
+    if (UI.valLat) { UI.valLat.textContent = 'NO FIX'; UI.valLat.className = 'metric-compact warn'; }
+    if (UI.valLng) { UI.valLng.textContent = 'NO FIX'; UI.valLng.className = 'metric-compact warn'; }
+    if (UI.valAlt) { UI.valAlt.textContent = '— m'; UI.valAlt.className = 'metric-compact no-data'; }
     if (UI.valSats) { UI.valSats.textContent = `${sats} SATS`; UI.valSats.className = 'metric-compact warn'; }
-    if (UI.scenarioGps) UI.scenarioGps.textContent = `NEO-6M receiver active on UART2 (pins 16/17). Searching for satellite lock (${sats} visible). Place antenna near open sky.`;
-    if (UI.barSats) { UI.barSats.style.width = `${Math.max(15, (sats / 8) * 100)}%`; UI.barSats.className = 'threshold-bar warn'; }
+    if (UI.barSats) {
+      UI.barSats.style.width = `${Math.max(10, (sats / 12) * 100)}%`;
+      UI.barSats.className = 'threshold-bar warn';
+    }
+    const isSearching = t.gpsStatus === 'ACQUIRING' || sats > 0;
+    if (UI.gpsWidgetBadge) {
+      UI.gpsWidgetBadge.textContent = isSearching ? 'ACQUIRING FIX' : 'INDOORS // 0 SATS';
+      UI.gpsWidgetBadge.className = 'badge-status warn';
+    }
+    if (UI.cardGps) UI.cardGps.className = 'apple-widget state-warning';
+    if (UI.scenarioGps) {
+      UI.scenarioGps.textContent = isSearching
+        ? `NEO-6M receiver locking satellite constellation (${sats} visible). Moving near a window accelerates fix.`
+        : 'NEO-6M receiver active (0 satellites locked). GPS microwave signals (1.575 GHz) are attenuated by concrete ceilings/roofs. Open sky required.';
+    }
   }
 
   // 8. Incident Assessment & Autonomous Remediation Alert
@@ -2766,26 +2778,22 @@ function handleIncomingSerialLine(raw) {
         if (!isNaN(v) && v >= 0.0 && v <= 100.0) state.telemetry.humidity = v;
       }
 
-      // ── MQ-135 Gas — KEY FIX: firmware uses "gas", NOT "mq135" ────────────
-      // Firmware already maps ADC to PPM (30–800 range), so store directly
+      // ── MQ-135 Gas (GPIO 34) & MQ-7 Carbon Monoxide (GPIO 35) ─────────────
+      // Pure 100% genuine hardware readings — zero hardcoded synthetic fallbacks
       if (obj.gas !== undefined) {
         state.telemetry.gasPpm = parseFloat(obj.gas);
-        state.telemetry.mq135Ao = null; // no raw AO in JSON mode
-        // Populate CO baseline from atmospheric gas reading
-        if (state.telemetry.coPpm === null || isNaN(state.telemetry.coPpm)) {
-          state.telemetry.coPpm = Math.max(12, Math.round(state.telemetry.gasPpm * 0.18));
-          state.telemetry.mq7Ao = state.telemetry.coPpm;
-        }
+        state.telemetry.mq135Ao = state.telemetry.gasPpm;
       }
-      // Also accept "mq135" key for custom firmware builds
-      if (obj.mq135 !== undefined) state.telemetry.gasPpm = parseFloat(obj.mq135);
-      // Dedicated MQ-7 keys (if sent)
-      if (obj.mq7 !== undefined) {
-        state.telemetry.coPpm = parseFloat(obj.mq7);
-        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
+      if (obj.mq135 !== undefined) {
+        state.telemetry.gasPpm = parseFloat(obj.mq135);
+        state.telemetry.mq135Ao = state.telemetry.gasPpm;
       }
       if (obj.co !== undefined) {
         state.telemetry.coPpm = parseFloat(obj.co);
+        state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
+      }
+      if (obj.mq7 !== undefined) {
+        state.telemetry.coPpm = parseFloat(obj.mq7);
         state.telemetry.mq7Ao = Math.round(state.telemetry.coPpm);
       }
 
@@ -2827,8 +2835,10 @@ function handleIncomingSerialLine(raw) {
       }
 
       // Update GPS status pill from parsed lat/lng
-      if (state.telemetry.lat !== null && state.telemetry.lng !== null) {
+      if (state.telemetry.lat !== null && state.telemetry.lng !== null && (state.telemetry.lat !== 0 || state.telemetry.lng !== 0)) {
         state.telemetry.gps = `${state.telemetry.lat.toFixed(5)}°N, ${state.telemetry.lng.toFixed(5)}°E`;
+      } else if (state.telemetry.gpsStatus === 'NO_FIX_INDOORS' || (state.telemetry.lat === 0 && state.telemetry.lng === 0)) {
+        state.telemetry.gps = 'INDOORS (0 SATS)';
       }
 
       updateDashboardUI(state.telemetry);

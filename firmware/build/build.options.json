@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32",
+  "hardwareFolders": "C:\\Users\\hprad\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.14,C:\\Users\\hprad\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.14",
+  "otherLibrariesFolders": "C:\\Users\\hprad\\OneDrive\\Documents\\Arduino\\libraries",
+  "sketchLocation": "C:\\Users\\hprad\\OneDrive\\Desktop\\helmet\\firmware\\helmet_firmware"
+}
